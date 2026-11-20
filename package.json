@@ -1,0 +1,19 @@
+{
+  "name": "codigo-de-barras",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @cdb/web dev",
+    "build": "pnpm --filter @cdb/web build",
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/interpreter && tsc -p packages/sim && tsc -p packages/db && tsc -p apps/web"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": "22.x"
+  }
+}

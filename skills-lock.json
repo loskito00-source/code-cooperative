@@ -1,0 +1,124 @@
+{
+  "version": 2,
+  "skills": {
+    "build-game-audio-feedback": {
+      "source": "MengTo/Skills",
+      "commit": "3cc93458c4949c39a04e938ea7892a1d6d3d40bf",
+      "sourceType": "github",
+      "skillPath": "agent-skills/game-development/build-game-audio-feedback/SKILL.md",
+      "computedHash": "80fad632da978194758698c9f8e75ad0c8d45bf3a7ba267fcd75e30f7a1c1391"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "commit": "57217cf86ba38148a57af9e90d14a4c049558330",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "7bc223e2aafbdbf6e50ea243ba6ef67fe432bb069ab439fea0390795dac0bf7f"
+    },
+    "game-audio": {
+      "source": "PlayableIntelligence/game-creator",
+      "commit": "53676bd2a524989745ce7cbd4128c17e8a20dd3d",
+      "sourceType": "github",
+      "skillPath": "skills/game-audio/SKILL.md",
+      "computedHash": "ca4bdca76187bf9f04f37c2ed5b3ec66b7b347c8e50c0d94a643201e139eb9d1"
+    },
+    "game-design-document": {
+      "source": "ityes22/game-design-document",
+      "commit": "0b6126aa8aba5352a179012746e8319fd093ef12",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "3fd97b3bde1f8347bb6242f97172d21863c0b6985b4a9cc67d7bda2b3bf7c046"
+    },
+    "game-design-theory": {
+      "source": "pluginagentmarketplace/custom-plugin-game-developer",
+      "commit": "aa7edfe267b34eac63d888f60b13e08aca7850ed",
+      "sourceType": "github",
+      "skillPath": "skills/game-design-theory/SKILL.md",
+      "computedHash": "3a508065c00bc97e64af2ef38359fe6ae232cfeb2b5877a2fd4a3be8b19d5a45"
+    },
+    "game-setup-and-config": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/game-setup-and-config/SKILL.md",
+      "computedHash": "768aa16da0efb08b22cbf91be3ce656008a88bd929929fee942152fad485e3f3"
+    },
+    "phaser-core": {
+      "source": "gamedev-skills/awesome-gamedev-agent-skills",
+      "commit": "c6ca6c41c839b68319ffc08430b99ab768debc32",
+      "sourceType": "github",
+      "skillPath": "skills/web-engines/phaser-core/SKILL.md",
+      "computedHash": "15f20e141070469f91a6eeef6f8fa3b50989f0f3d9e7f3792242166291786c38"
+    },
+    "postgresql-table-design": {
+      "source": "wshobson/agents",
+      "commit": "42203085cfc5736204bf0f6d436dff7e1da0bf3f",
+      "sourceType": "github",
+      "skillPath": "plugins/database-design/skills/postgresql-table-design/SKILL.md",
+      "computedHash": "c2d9f4b5037b4320be0cc2489eeb287d3147477ae1f48b33f5f897e2c562ed06"
+    },
+    "sprites-and-images": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/sprites-and-images/SKILL.md",
+      "computedHash": "5cc09bc45e88614494f2eea3da8a51ccfa88900873e2e60744e54a1844417faa"
+    },
+    "sql-queries": {
+      "source": "anthropics/knowledge-work-plugins",
+      "commit": "b4c9a4e1de4b42868b74a6fe30ac766f64e43a3e",
+      "sourceType": "github",
+      "skillPath": "data/skills/sql-queries/SKILL.md",
+      "computedHash": "b466ccfeda5f2b46338652bf0994ff8f6938bc1743cf18d65cb6cb42f7551429"
+    },
+    "threejs-fundamentals": {
+      "source": "CloudAI-X/threejs-skills",
+      "commit": "0e181866f095b5f06d005133876e926515390d95",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-fundamentals/SKILL.md",
+      "computedHash": "268a79c9d3f35bd7deffc65293f4bd1bcc141b496c69b0f67e9886fc28def4b2"
+    },
+    "threejs-gltf-loading": {
+      "source": "gamedev-skills/awesome-gamedev-agent-skills",
+      "commit": "c6ca6c41c839b68319ffc08430b99ab768debc32",
+      "sourceType": "github",
+      "skillPath": "skills/web-engines/threejs-gltf-loading/SKILL.md",
+      "computedHash": "62f37032641f7d504b63f43a4b2fbf7a7ef37009461086049c927bd8bfc65c0c"
+    },
+    "threejs-materials": {
+      "source": "CloudAI-X/threejs-skills",
+      "commit": "0e181866f095b5f06d005133876e926515390d95",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-materials/SKILL.md",
+      "computedHash": "138b23dd0b365bc6ee2f20eebcf1fcfb426b6acaeeda18c57c88039f8628d9aa"
+    },
+    "threejs-materials-lighting": {
+      "source": "gamedev-skills/awesome-gamedev-agent-skills",
+      "commit": "c6ca6c41c839b68319ffc08430b99ab768debc32",
+      "sourceType": "github",
+      "skillPath": "skills/web-engines/threejs-materials-lighting/SKILL.md",
+      "computedHash": "c9e551ce59c90c4a788c5d848151f28539342b1e4df35e0921c2641dd6088221"
+    },
+    "typescript-advanced-types": {
+      "source": "wshobson/agents",
+      "commit": "42203085cfc5736204bf0f6d436dff7e1da0bf3f",
+      "sourceType": "github",
+      "skillPath": "plugins/javascript-typescript/skills/typescript-advanced-types/SKILL.md",
+      "computedHash": "34c5b3863fde1fc85981ac583ecaf0140471b374d0b7002ac5bc0bea2cf38b24"
+    },
+    "vite": {
+      "source": "antfu/skills",
+      "commit": "4a6bb39e7b45e26402eb215393c51ccf5df1ca4c",
+      "sourceType": "github",
+      "skillPath": "skills/vite/SKILL.md",
+      "computedHash": "db9eea82d8bf6ce0f60a4a1d94a626c718df7d97160b5f1d5b150647e0c401b3"
+    },
+    "vitest": {
+      "source": "antfu/skills",
+      "commit": "4a6bb39e7b45e26402eb215393c51ccf5df1ca4c",
+      "sourceType": "github",
+      "skillPath": "skills/vitest/SKILL.md",
+      "computedHash": "bd95e41d66d76da9008893c9bc48c30f0a68f352cd2b00017767f5e4c129501d"
+    }
+  }
+}
