@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type GLTF, GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { buildAlley, buildTruck, cardboardBox, type Truck } from "./alley.js";
+import { mergeStatic, QualityGovernor } from "./perf.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { type Customer, type ProductName, type Robot, type SimEvent, WAREHOUSE_START, type World } from "@cdb/sim";
 
@@ -149,6 +150,7 @@ export class Store3D {
   private hemi!: THREE.HemisphereLight;
   private sun!: THREE.DirectionalLight;
   private readonly lamps: THREE.PointLight[] = [];
+  private readonly quality: QualityGovernor;
   /** Luz del día (1 = mediodía, 0 = noche) y tono de amanecer/atardecer, suavizados entre cuadros. */
   private daylight = { k: 1, warm: 0, sky: "", last: 0 };
   private hovered: HoverTarget | null = null;
@@ -185,13 +187,19 @@ export class Store3D {
     this.hooks = hooks;
     const w = hooks.world();
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // tarjeta de video dedicada si el portátil tiene dos; sin suavizado de bordes en pantallas de alta densidad
+    // (ahí casi no se nota y es de lo que más cuesta)
+    this.renderer = new THREE.WebGLRenderer({ antialias: (window.devicePixelRatio || 1) < 1.5, alpha: true, powerPreference: "high-performance" });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     container.append(this.renderer.domElement);
+    // resolución dinámica: baja sola si el equipo no da abasto (y en último caso apaga las sombras)
+    this.quality = new QualityGovernor(this.renderer, () => {
+      this.sun.castShadow = false;
+      this.renderer.shadowMap.enabled = false;
+    });
 
     this.labels = new CSS2DRenderer();
     this.labels.domElement.className = "labels";
@@ -265,17 +273,18 @@ export class Store3D {
     const sun = new THREE.DirectionalLight(0xfff1dc, 2.4);
     this.hemi = hemi;
     this.sun = sun;
-    // lámparas de adentro: se prenden de noche (sin sombras, para que no pese)
-    for (const [x, y] of [[w.register.x + 1, 1], [(w.width - 1) / 2 + 1.5, w.height - 2], [1, w.height - 3], [w.width - 2, 1]]) {
-      const lamp = new THREE.PointLight(0xffd59a, 0, 6, 1.4);
-      lamp.position.copy(this.pos(x, y)).add(new THREE.Vector3(0, 2.1, 0));
+    // lámpara de adentro: se prende de noche. Una sola y alta, que alumbra toda la tienda (cada luz puntual
+    // se calcula en cada píxel de la pantalla: antes eran cuatro y pesaban mucho en equipos sin tarjeta de video)
+    for (const [x, y] of [[(w.width - 1) / 2, (w.height - 1) / 2]]) {
+      const lamp = new THREE.PointLight(0xffd59a, 0, 13, 1.1);
+      lamp.position.copy(this.pos(x, y)).add(new THREE.Vector3(0, 3.2, 0));
       s.add(lamp);
       this.lamps.push(lamp);
     }
     sun.position.set(w.width + 4, 10, w.height + 2);
     sun.target.position.set((w.width - 1) / 2, 0, (w.height - 1) / 2);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1536, 1536);
     Object.assign(sun.shadow.camera, { near: 1, far: 40, left: -8, right: 8, top: 8, bottom: -8 });
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.02;
@@ -296,6 +305,8 @@ export class Store3D {
     edge.position.set((w.width - 1) / 2, -0.38, (w.height - 1) / 2);
     s.add(edge);
 
+    // todo lo que se agrega desde aquí hasta el callejón (piso y paredes) no se mueve: al final se funde
+    const staticFrom = s.children.length;
     for (let y = 0; y < w.height; y++) {
       for (let x = 0; x < w.width; x++) {
         const kind = w.tiles[y][x];
@@ -307,8 +318,11 @@ export class Store3D {
 
     this.buildWalls(w);
 
+    const statics = [slab, edge, ...s.children.slice(staticFrom)];
     // callejón detrás de la tienda y el camión del distribuidor
-    s.add(buildAlley());
+    const alley = buildAlley();
+    s.add(alley);
+    statics.push(alley);
     this.truck = buildTruck({ loaf: this.model("loaf"), carton: this.model("carton"), egg: this.model("egg") });
     this.truck.group.position.copy(Store3D.PARK);
     this.openDoors(1);
@@ -363,6 +377,13 @@ export class Store3D {
 
     for (const r of w.robots) this.robots.set(r.id, this.makeRobot(r));
     this.buildCompass(w);
+
+    // cientos de piezas fijas -> unas pocas mallas (una por material); lo plano no proyecta sombra
+    mergeStatic(s, statics, (m) => {
+      m.geometry.computeBoundingBox();
+      const size = m.geometry.boundingBox!.getSize(new THREE.Vector3()).multiply(m.getWorldScale(new THREE.Vector3()));
+      return Math.min(size.x, size.y, size.z) < 0.06 && size.y < 0.4;
+    });
   }
 
   /** Las cuatro direcciones de move(), pintadas alrededor de la tienda. */
@@ -679,6 +700,7 @@ export class Store3D {
   private frame(time: number): void {
     this.timer.update(time);
     const dt = Math.min(this.timer.getDelta(), 0.1);
+    this.quality.tick(time);
     const frac = this.hooks.advance(dt * 1000);
     const w = this.hooks.world();
 
@@ -771,7 +793,7 @@ export class Store3D {
     this.sun.intensity = THREE.MathUtils.lerp(0.22, 2.4, d.k);
     this.sun.color.copy(mix(0x9db2ff, 0xfff1dc, 0xff9a50, 0.6));
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(0.85, 1.05, d.k);
-    for (const l of this.lamps) l.intensity = (1 - d.k) * 3.2;
+    for (const l of this.lamps) l.intensity = (1 - d.k) * 6;
     const css = (c: THREE.Color) => `#${c.getHexString()}`;
     const sky = `linear-gradient(180deg, ${css(mix(0x0d1730, 0xa9dcec, 0xf3a06a, 0.55))} 0%, ${css(mix(0x1b2a4c, 0xd9efe6, 0xf6c79a, 0.45))} 50%, ${css(mix(0x2a3452, 0xf4ecdc, 0xf2d6b0, 0.3))} 100%)`;
     if (sky !== d.sky) {

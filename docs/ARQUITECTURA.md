@@ -167,6 +167,18 @@ cerrar, zoom (− % +) que reescala `--fs-*` y el tamaño de la ventana, `setBox
 **Modelos 3D**: `apps/web/public/models/{shop,chars,food}` (Kenney CC0, ver `CREDITS.md`). Cada kit tiene su
 `Textures/colormap.png`: no mezclar carpetas.
 
+### Rendimiento (`apps/web/src/perf.ts`)
+
+- **Piezas fijas fundidas**: al terminar `Store3D.build()`, el piso, las paredes, la base y el callejón se funden en
+  una malla por material (`mergeStatic`). Bajó de ~690 a ~250 dibujos por cuadro. Si agregas algo fijo a esa parte,
+  se funde solo; si algo de ahí tiene que moverse, esconderse o responder al ratón, sácalo de la lista `statics`.
+  Lo plano (pisos, asfalto) no proyecta sombra.
+- **Resolución dinámica** (`QualityGovernor`): resolución máxima 1.5×; si los cuadros tardan más de 22 ms la baja
+  (hasta 0.6×) y si sobra la sube. Si aun así va lento, apaga las sombras.
+- **Luces**: cada `PointLight` se calcula en cada píxel. Solo hay dos: la lámpara de adentro (de noche) y la del
+  callejón. No agregues más; usa materiales emisivos para lo que brilla.
+- Nada de `backdrop-filter` ni `mix-blend-mode` sobre la escena 3D: obligan al navegador a recomponer todo cada cuadro.
+
 ## Recetas
 
 **Agregar un comando para los robots**
