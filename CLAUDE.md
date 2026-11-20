@@ -18,7 +18,8 @@ pnpm typecheck   # tsc en los 4 paquetes
 pnpm build       # build de producción (apps/web/dist). Los avisos "node:module externalized" de PGlite son normales.
 ```
 
-**Despliegue en Vercel**: `vercel.json` en la raíz (instala con pnpm, corre `pnpm build`, publica `apps/web/dist`).
+**Despliegue en Vercel**: el proyecto de Vercel tiene Root Directory = `apps/web`; la config está en `apps/web/vercel.json`
+(instala con pnpm, corre `pnpm build`, publica `dist`).
 Es un sitio estático: todo (simulación, PostgreSQL, audio) corre en el navegador de cada jugador, no hay servidor.
 
 Corre `pnpm typecheck && pnpm test` antes de dar algo por terminado. Para cambios visuales, verifica en el navegador

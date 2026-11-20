@@ -1,0 +1,80 @@
+CÓDIGO DE BARRAS: SOLUCIÓN DE LA ETAPA 1 (MIGRACIÓN DEL INVENTARIO)
+===================================================================
+
+La misión "Organiza tu inventario" tiene 4 objetivos:
+  1. Leer la hoja con pandas: pd.read_excel(...)
+  2. Crear tus tablas con CREATE TABLE
+  3. Subir pan, leche y huevos con df.to_sql(...)
+  4. Sin productos repetidos ni la fila TOTAL
+
+La hoja del distribuidor (entrega_distribuidor.xlsx) viene desordenada a propósito:
+  - Encabezados con tildes y espacios ("Código", "Precio Unitario"...)
+  - Nombres mal escritos: "Pan " (con espacio) y "HUEVOS" (en mayúsculas)
+  - La leche está anotada dos veces
+  - Al final hay una fila TOTAL que no es un producto
+
+
+PASO 1: crear la tabla
+----------------------
+Abre la ventana "Base de datos", pega esto y ejecútalo (Ctrl+Enter):
+
+CREATE TABLE productos (
+    codigo    TEXT PRIMARY KEY,
+    nombre    TEXT NOT NULL UNIQUE,
+    categoria TEXT,
+    cantidad  INTEGER NOT NULL CHECK (cantidad >= 0),
+    precio    INTEGER NOT NULL,
+    costo     INTEGER NOT NULL,
+    vence     DATE
+);
+
+Importante: la columna debe llamarse "cantidad" (o algo parecido: stock, unidades...).
+El almacén del juego lee esa columna para saber cuántas unidades hay de cada producto.
+
+
+PASO 2: limpiar la hoja y subirla
+---------------------------------
+Abre la ventana "inventario.py", borra todo, pega esto y ejecútalo (botón ▶ Ejecutar o Ctrl+Enter):
+
+import pandas as pd
+
+# 1. Leer la hoja del distribuidor
+df = pd.read_excel("entrega_distribuidor.xlsx")
+
+# 2. Ponerle a las columnas los mismos nombres de la tabla
+df = df.rename(columns={"Código": "codigo", "Producto": "nombre", "Categoría": "categoria",
+                        "Cantidad": "cantidad", "Precio Unitario": "precio",
+                        "Costo Unitario": "costo", "Vence": "vence"})
+
+# 3. Arreglar los nombres: "Pan " -> "pan", "HUEVOS" -> "huevos"
+df["nombre"] = df["nombre"].str.strip().str.lower()
+
+# 4. Quitar la fila TOTAL y la leche repetida
+df = df[df["nombre"] != "total"]
+df = df.drop_duplicates()
+
+print(df)
+
+# 5. Subir los 3 productos a la tabla
+n = df.to_sql("productos", db)
+print(f"Subí {n} productos")
+
+
+Resultado esperado en la consola:
+  Subí 3 productos
+
+Con eso se marcan los 4 objetivos, los robots descargan las cajas del camión y se activa el
+botón "Abrir la tienda ▸".
+
+
+SI ALGO SALE MAL
+----------------
+- "to_sql no crea tablas": primero haz el PASO 1.
+- Si subiste datos sucios (por ejemplo, ejecutaste el script antes de limpiarlo), vacía la tabla
+  en la ventana Base de datos y vuelve a ejecutar inventario.py:
+
+      DELETE FROM productos;
+
+- Para revisar lo que quedó guardado:
+
+      SELECT * FROM productos;
