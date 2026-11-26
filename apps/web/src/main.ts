@@ -10,7 +10,7 @@ import { SheetWindow } from "./sheet.js";
 import { AssemblyView } from "./assembly.js";
 import { BrowserWindow } from "./browser.js";
 import { SqlWindow } from "./sqlwindow.js";
-import { TerminalWindow } from "./terminal.js";
+import { type TermLink, TerminalWindow } from "./terminal.js";
 import { MainMenu } from "./start.js";
 import { type PlaceKind, Store3D } from "./store3d.js";
 import { FloatingWindow, leftInset, paneSplitter, topInset } from "./windows.js";
@@ -531,43 +531,81 @@ const browserWin = new FloatingWindow(layer, {
 });
 const browser = new BrowserWindow(browserWin, () => world, () => refreshUi(true), (f) => openSheet(f));
 
+/**
+ * Terminales de los servidores. En línea cada servidor tiene dos sesiones: la del anfitrión ("host") y la del otro
+ * jugador ("guest"), cada una con su propia shell (su carpeta, su historial, sus procesos como top o tail -f). Las dos
+ * corren en el navegador del anfitrión sobre el mismo servidor, así que archivos, red, ataques y todo lo demás lo
+ * comparten en tiempo real. Cada jugador abre la suya y también la del otro: en las dos se puede leer y escribir, y
+ * lo que escribe cualquiera se ve en vivo. En local hay una sola.
+ */
+type TermSlot = "host" | "guest";
 const terminals = new Map<string, TerminalWindow>();
-/** La ventana de terminal de un servidor (se crea la primera vez). */
-function terminalFor(serverId: string): TerminalWindow {
-  let t = terminals.get(serverId);
-  if (!t) {
-    const n = terminals.size;
-    const win = new FloatingWindow(layer, {
-      id: `term-${serverId}`, title: "terminal", x: leftInset() + 30 + n * 30, y: 90 + n * 30, width: Math.min(820, window.innerWidth - 200), height: Math.min(520, H - 140), minWidth: 380, minHeight: 200, open: false,
-    });
-    const room = session.room;
-    t = new TerminalWindow(
-      win, world, serverId,
-      () => {
-        refreshUi(true);
-        void serverMissionCheck();
-      },
-      // en línea: el anfitrión corre los comandos de los dos y publica la salida; el espejo manda lo que escribe
-      !room ? {} : isGuest()
-        ? {
-            send: (input) => void room.call("term", { s: serverId, ...input }).catch((e: Error) => toast(e.message, "bad")),
-            typing: (text) => room.send("term-typing", { s: serverId, text }),
-          }
-        : { publish: (out) => room.send("term-out", { s: serverId, out }), typing: (text) => room.send("term-typing", { s: serverId, text }) },
-    );
-    terminals.set(serverId, t);
-    if (room && isGuest()) {
-      // lo que ya estaba escrito en la terminal del anfitrión
-      const tw = t;
-      void room.call<{ lines: string[]; prompt: string; hostname: string }>("term", { s: serverId, hello: true }).then((r) => tw.show({ lines: r.lines, clear: true, prompt: r.prompt, hostname: r.hostname }));
-    }
-    watchWindow(win);
+const mySlot = (): TermSlot => (isGuest() ? "guest" : "host");
+const otherSlot = (): TermSlot => (isGuest() ? "host" : "guest");
+/** Nombre del otro jugador (para "terminal de Ana"). */
+function otherName(): string {
+  const room = session.room;
+  return room?.peers.find((p) => p.id !== room.me.id)?.name ?? "tu compañero";
+}
+
+/** La ventana de terminal de un servidor (se crea la primera vez). Sin `slot`, la de este jugador. */
+function terminalFor(serverId: string, slot: TermSlot = mySlot()): TerminalWindow {
+  const key = `${serverId}:${slot}`;
+  let t = terminals.get(key);
+  if (t) return t;
+  const room = session.room;
+  const mine = slot === mySlot();
+  const n = terminals.size;
+  // la del otro tiene su propia ventana (y su propia posición guardada); un botón salta de una a la otra
+  const peek = room ? document.createElement("button") : null;
+  const win = new FloatingWindow(layer, {
+    id: mine ? `term-${serverId}` : `term-${serverId}-otro`, title: "terminal", titleExtra: peek ?? undefined,
+    x: leftInset() + 30 + n * 30, y: 90 + n * 30, width: Math.min(820, window.innerWidth - 200), height: Math.min(520, H - 140), minWidth: 380, minHeight: 200, open: false,
+  });
+  if (peek) {
+    peek.className = "term-peek";
+    peek.textContent = mine ? "⇄ La de tu compañero" : "⇄ Mi terminal";
+    peek.title = mine ? "Abrir la terminal de tu compañero en este servidor" : "Volver a tu terminal en este servidor";
+    peek.addEventListener("click", () => openTerminal(serverId, mine ? otherSlot() : mySlot()));
   }
+  const label = () => (mine ? "terminal" : `terminal de ${otherName()}`);
+  const send = (event: string, payload: Record<string, unknown>) => room?.send(event, { s: serverId, slot, ...payload });
+  let link: TermLink;
+  if (!room) link = {};
+  else if (!isGuest()) {
+    // anfitrión: corre las dos shells y publica lo que sale de cada una
+    link = { publish: (out) => send("term-out", { out }), typing: (text) => send("term-typing", { text }), label };
+  } else {
+    // espejo: lo que escribe (en su terminal o en la del anfitrión) lo corre el anfitrión en esa sesión
+    link = {
+      send: (input) => void room.call("term", { s: serverId, slot, ...input }).catch((e: Error) => toast(e.message, "bad")),
+      typing: (text) => send("term-typing", { text }),
+      label,
+    };
+  }
+  t = new TerminalWindow(
+    win, world, serverId,
+    () => {
+      refreshUi(true);
+      void serverMissionCheck();
+    },
+    link,
+  );
+  terminals.set(key, t);
+  if (room && isGuest()) {
+    // lo que ya estaba escrito en esa terminal (la corre el anfitrión)
+    const tw = t;
+    void room
+      .call<{ lines: string[]; prompt: string; hostname: string }>("term", { s: serverId, slot, hello: true })
+      .then((r) => tw.show({ lines: r.lines, clear: true, prompt: r.prompt, hostname: r.hostname }))
+      .catch(() => undefined);
+  }
+  watchWindow(win);
   return t;
 }
 
-function openTerminal(serverId: string): void {
-  const t = terminalFor(serverId);
+function openTerminal(serverId: string, slot: TermSlot = mySlot()): void {
+  const t = terminalFor(serverId, slot);
   t.win.show();
   t.focus();
   renderExplorer();
@@ -615,10 +653,15 @@ const STATIC_EXPLORER: (FileEntry | Folder)[] = [
 let EXPLORER: (FileEntry | Folder)[] = STATIC_EXPLORER;
 let FILES: FileEntry[] = [];
 function rebuildExplorerTree(): void {
-  const servers: FileEntry[] = world.servers.map((srv) => ({
-    label: `${srv.hostname}`, win: terminalFor(srv.id).win, icon: "term", hint: `Terminal de ${srv.hostname}${srv.ip ? ` (${srv.ip})` : ""}`,
-    status: () => (srv.malware && srv.malware.respawnAt === null) || srv.ddos ? ["alerta", "error"] : srv.load >= 0.8 ? [`${Math.round(srv.load * 100)}%`, "paused"] : null,
-  }));
+  const servers: FileEntry[] = world.servers.flatMap((srv) => {
+    const status: FileEntry["status"] = () =>
+      (srv.malware && srv.malware.respawnAt === null) || srv.ddos ? ["alerta", "error"] : srv.load >= 0.8 ? [`${Math.round(srv.load * 100)}%`, "paused"] : null;
+    const mine: FileEntry = { label: `${srv.hostname}`, win: terminalFor(srv.id).win, icon: "term", hint: `Tu terminal de ${srv.hostname}${srv.ip ? ` (${srv.ip})` : ""}`, status };
+    if (!isOnline()) return [mine];
+    // en línea: también la terminal del otro jugador en ese servidor (los dos pueden usarla)
+    const name = otherName();
+    return [mine, { label: `${srv.hostname} · ${name}`, win: terminalFor(srv.id, otherSlot()).win, icon: "term", hint: `Terminal de ${name} en ${srv.hostname}: misma máquina, otra sesión` }];
+  });
   const sheets: FileEntry[] = world.workbooks.map((b, i) => ({
     label: b.filename, win: sheetWin, icon: "xlsx",
     hint: i === 0 ? "La hoja del distribuidor (solo lectura)" : `Excel que dejó el repartidor de ${SUPPLIER.name}: migra los datos a tu inventario`,
@@ -789,6 +832,8 @@ function watchWindow(w: FloatingWindow): void {
 }
 rebuildExplorerTree();
 for (const w of [...FILES, ...DOCK].map((d) => d.win)) watchWindow(w);
+// una ventana se abrió desde la barra de minimizadas (o se minimizó/cerró)
+window.addEventListener("cdb:windows", () => refreshDock());
 
 /** Marca qué ventanas están abiertas: en la barra de herramientas, en el árbol y en la lista "Abiertos". */
 function refreshDock(): void {
@@ -2001,8 +2046,9 @@ function registerHostHandlers(room: Room): void {
   });
   room.handle("debug", ({ op, r }: { op: string; r: string }) => (op === "step" ? stepLine(r) : togglePause(r)));
   room.handle("script", ({ op }: { op: string }) => (op === "run" ? runScript() : stopScript()));
-  room.handle("term", ({ s, text, ctrl, hello }: { s: string; text?: string; ctrl?: string; hello?: boolean }) => {
-    const t = terminalFor(s);
+  room.handle("term", ({ s, slot, text, ctrl, hello }: { s: string; slot?: TermSlot; text?: string; ctrl?: string; hello?: boolean }) => {
+    // el otro jugador puede usar cualquiera de las dos sesiones del servidor
+    const t = terminalFor(s, slot ?? "guest");
     if (hello) return { lines: t.recent.slice(-200), prompt: t.shell!.prompt(), hostname: t.shell!.server.hostname };
     if (ctrl) t.interrupt();
     else t.exec(text ?? "");
@@ -2076,8 +2122,9 @@ async function startOnline(choice: OnlineChoice): Promise<boolean> {
   session.collab = collab;
   room.on("flow", ({ k }: { k: string }) => onRemoteFlow(k));
   // la línea de comando de las terminales: lo que el otro va escribiendo
-  room.on("term-typing", ({ s, text }: { s: string; text: string }) => {
-    if (session.mode !== "local") terminalFor(s).showTyping(text); // (aún sin saber si somos anfitrión: se ignora)
+  room.on("term-typing", ({ s, slot, text }: { s: string; slot?: TermSlot; text: string }) => {
+    // (aún sin saber si somos anfitrión: se ignora)
+    if (session.mode !== "local") terminalFor(s, slot ?? (isGuest() ? "host" : "guest")).showTyping(text);
   });
   linkAssembly(room);
   knownPlayers.add(choice.player.name);
@@ -2142,7 +2189,7 @@ async function startAsGuest(room: Room, collab: Collab, choice: OnlineChoice, sc
   screen.set("Esperando al anfitrión…");
   const phase = await room.call<string>("phase", null, 8000).catch(() => "playing");
   guestSync = new GuestSync(room, world, applyMeta);
-  room.on("term-out", ({ s, out }: { s: string; out: Parameters<TerminalWindow["show"]>[0] }) => terminalFor(s).show(out));
+  room.on("term-out", ({ s, slot, out }: { s: string; slot?: TermSlot; out: Parameters<TerminalWindow["show"]>[0] }) => terminalFor(s, slot ?? "host").show(out));
   room.on("db-changed", () => sqlWin.refreshSoon());
   if (phase === "naming") {
     screen.remove();
@@ -2178,6 +2225,9 @@ function watchPeers(room: Room): void {
       void screen;
     }
     if (nightPanel && world.night) showNight(null); // los nombres de los botones de voto
+    // "servidor · Ana" en el explorador (la terminal del otro)
+    rebuildExplorerTree();
+    renderExplorer();
   };
 }
 

@@ -35,6 +35,20 @@ const ZOOM_MAX = 1.8;
 const ZOOM_STEP = 0.1;
 let zTop = 10;
 
+/** Barra de abajo donde quedan las ventanas minimizadas (en el orden en que se minimizaron). */
+let minibar: HTMLElement | null = null;
+function getMinibar(): HTMLElement {
+  if (!minibar) {
+    minibar = document.createElement("nav");
+    minibar.className = "minibar";
+    minibar.setAttribute("aria-label", "Ventanas minimizadas");
+    document.body.append(minibar);
+  }
+  // empieza donde termina el explorador de archivos
+  minibar.style.left = `${leftInset()}px`;
+  return minibar;
+}
+
 /** Borde inferior de la barra superior (el letrero): las ventanas no pueden quedar debajo de él. */
 export function topInset(): number {
   const bar = document.querySelector(".letrero");
@@ -70,6 +84,8 @@ export class FloatingWindow {
   readonly titleEl: HTMLElement;
   private minimized = false;
   private zoom = 1;
+  /** Botón en la barra de minimizadas (mientras la ventana está minimizada). */
+  private chip: HTMLButtonElement | null = null;
   onFocus?: () => void;
   onShow?: () => void;
 
@@ -120,7 +136,7 @@ export class FloatingWindow {
       this.place(start.x, start.y, Math.max(opts.minWidth ?? 260, start.w + dx), Math.max(opts.minHeight ?? 140, start.h + dy)),
     );
     // ojo: una ventana oculta mide 0 de ancho; por eso el ancho "normal" se guarda en dataset.w (como la altura en dataset.h)
-    window.addEventListener("resize", () => this.place(this.el.offsetLeft, this.el.offsetTop, this.fullWidth(), this.fullHeight(), false));
+    window.addEventListener("resize", () => this.place(this.x, this.y, this.fullWidth(), this.fullHeight(), false));
     this.focus();
   }
 
@@ -128,7 +144,7 @@ export class FloatingWindow {
     handle.addEventListener("pointerdown", (e) => {
       if ((e.target as HTMLElement).closest("button") || e.button !== 0) return;
       e.preventDefault();
-      const start = { x: this.el.offsetLeft, y: this.el.offsetTop, w: this.el.offsetWidth, h: this.fullHeight() };
+      const start = { x: this.x, y: this.y, w: this.el.offsetWidth, h: this.fullHeight() };
       const sx = e.clientX;
       const sy = e.clientY;
       handle.setPointerCapture(e.pointerId);
@@ -163,6 +179,18 @@ export class FloatingWindow {
     if (save) this.save();
   }
 
+  /**
+   * Posición de la ventana. Se lee del estilo y no de offsetLeft/offsetTop: una ventana minimizada o cerrada no se
+   * dibuja (mide 0 y offsetLeft da 0), y así al volver a abrirla queda exactamente donde estaba.
+   */
+  private get x(): number {
+    return parseFloat(this.el.style.left) || this.opts.x;
+  }
+
+  private get y(): number {
+    return parseFloat(this.el.style.top) || this.opts.y;
+  }
+
   /** Ancho normal de la ventana (aunque ahora esté oculta y mida 0). */
   private fullWidth(): number {
     return Number(this.el.dataset.w) || this.opts.width;
@@ -176,8 +204,8 @@ export class FloatingWindow {
   private save(): void {
     const all = loadAll();
     all[this.opts.id] = {
-      x: this.el.offsetLeft,
-      y: this.el.offsetTop,
+      x: this.x,
+      y: this.y,
       width: this.fullWidth(),
       height: this.fullHeight(),
       open: !this.el.hidden,
@@ -193,7 +221,7 @@ export class FloatingWindow {
     if (next === this.zoom) return;
     const ratio = next / this.zoom;
     this.applyZoom(next);
-    this.place(this.el.offsetLeft, this.el.offsetTop, this.fullWidth() * ratio, this.fullHeight() * ratio, true);
+    this.place(this.x, this.y, this.fullWidth() * ratio, this.fullHeight() * ratio, true);
   }
 
   private applyZoom(z: number): void {
@@ -210,12 +238,45 @@ export class FloatingWindow {
     this.place(x, y, w, h, true);
   }
 
+  /**
+   * Minimizar: la ventana desaparece y queda como un botón en la barra de abajo; al darle clic vuelve con la misma
+   * posición y el mismo tamaño (no se tocan left/top/width ni dataset.h).
+   */
   setMinimized(min: boolean, save = true): void {
     this.minimized = min;
     this.el.classList.toggle("minimized", min);
-    this.el.style.height = min ? "" : `${this.el.dataset.h}px`;
+    this.el.style.height = `${this.el.dataset.h}px`;
+    this.syncChip();
     if (!min) this.onShow?.();
     if (save) this.save();
+  }
+
+  /** Pone o quita el botón de la barra de minimizadas. */
+  private syncChip(): void {
+    // para que la barra de herramientas y el explorador marquen qué está abierto
+    queueMicrotask(() => window.dispatchEvent(new Event("cdb:windows")));
+    const want = this.minimized && !this.el.hidden;
+    if (!want) {
+      this.chip?.remove();
+      this.chip = null;
+      if (minibar && !minibar.childElementCount) minibar.hidden = true;
+      return;
+    }
+    const bar = getMinibar();
+    bar.hidden = false;
+    if (!this.chip) {
+      this.chip = document.createElement("button");
+      this.chip.className = "minibar-chip";
+      this.chip.addEventListener("click", () => this.show());
+      bar.append(this.chip);
+    }
+    // el título puede haber cambiado (terminal con el nombre del servidor, estado del robot...)
+    // solo el texto del título (sin el estado del robot ni botones)
+    const title = [...this.titleEl.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim() || this.opts.title;
+    const dot = this.el.querySelector<HTMLElement>(".win-title .dot");
+    this.chip.innerHTML = `${dot ? `<span class="dot" style="background:${dot.style.background}"></span>` : ""}<span class="minibar-name"></span>`;
+    this.chip.querySelector(".minibar-name")!.textContent = title;
+    this.chip.title = `${title}: clic para abrir`;
   }
 
   focus(): void {
@@ -230,6 +291,7 @@ export class FloatingWindow {
     const wasHidden = this.el.hidden;
     this.el.hidden = false;
     if (this.minimized) this.setMinimized(false);
+    else this.syncChip();
     this.focus();
     if (wasHidden) {
       this.onShow?.();
@@ -239,6 +301,7 @@ export class FloatingWindow {
 
   close(): void {
     this.el.hidden = true;
+    this.syncChip();
     this.save();
   }
 

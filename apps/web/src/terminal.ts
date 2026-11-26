@@ -32,12 +32,15 @@ export interface TermLink {
   send?: (input: { text?: string; ctrl?: "c" }) => void;
   /** Los dos: lo que va escribiendo en la línea de comando (antes de Enter), para que el otro lo vea en vivo. */
   typing?: (text: string) => void;
+  /** Qué dice la barra de título después del nombre del servidor ("terminal", "terminal de Ana"). */
+  label?: () => string;
 }
 
 /**
  * Ventana de terminal de un servidor: muestra la salida, una línea para escribir, historial con ↑/↓, Tab para
  * completar, Ctrl+C para cortar (top, tail -f) y Ctrl+L para limpiar.
- * En una partida en línea la terminal es compartida: la corre el anfitrión y los dos ven lo mismo.
+ * En una partida en línea cada servidor tiene dos (una por jugador, cada una con su sesión); las corre el anfitrión
+ * y en cualquiera de las dos pueden escribir los dos.
  */
 export class TerminalWindow {
   /** null en el espejo (los comandos los corre el anfitrión). */
@@ -76,6 +79,10 @@ export class TerminalWindow {
     // la línea de comando es compartida: lo que escribe uno le aparece al otro mientras escribe
     this.inputEl.addEventListener("input", () => this.shareTyping());
     win.onShow = () => setTimeout(() => this.inputEl.focus(), 0);
+  }
+
+  private title(hostname: string): void {
+    this.win.titleEl.lastChild!.textContent = `${hostname} — ${this.link.label?.() ?? "terminal"}`;
   }
 
   private key(e: KeyboardEvent): void {
@@ -172,7 +179,7 @@ export class TerminalWindow {
     this.print(out.lines);
     this.promptEl.textContent = out.prompt;
     this.inputEl.type = out.secret ? "password" : "text";
-    this.win.titleEl.lastChild!.textContent = `${out.hostname} — terminal`;
+    this.title(out.hostname);
     if (out.live === undefined) return;
     if (out.live) {
       this.liveEl.hidden = false;
@@ -270,7 +277,7 @@ export class TerminalWindow {
     const p = this.shell.prompt();
     this.promptEl.textContent = p;
     this.inputEl.type = this.shell.pending?.secret ? "password" : "text";
-    this.win.titleEl.lastChild!.textContent = `${this.shell.server.hostname} — terminal`;
+    this.title(this.shell.server.hostname);
   }
 
   private startLive(): void {

@@ -60,7 +60,8 @@ Corre `pnpm typecheck && pnpm test` antes de dar algo por terminado. Para cambio
 - **CodeMirror**: los atajos propios (Ctrl+Enter) necesitan `Prec.highest(...)` o los pisa el keymap por defecto.
   Tab indenta gracias a `indentWithTab` + `indentUnit` de 4 espacios.
 - **Ventanas flotantes** (`windows.ts`): la altura "normal" vive en `dataset.h`; no la recalcules desde `offsetHeight`
-  mientras la ventana está minimizada (ya hubo un bug así). Nunca dejes ventanas debajo del letrero ni del explorador
+  mientras la ventana está minimizada (ya hubo un bug así). La posición se lee de `style.left/top` (getters `x`/`y`),
+  no de `offsetLeft`: minimizada o cerrada no se dibuja y daría 0. Minimizada = botón en la barra de abajo (`.minibar`). Nunca dejes ventanas debajo del letrero ni del explorador
   de archivos (barra lateral izquierda): usa `topInset()` y `leftInset()`.
 - **CSS2DRenderer**: elementos que el usuario debe ver no deben depender solo de transiciones CSS (en el Chrome
   headless de pruebas a veces se congelan). En las modales se usa `visibility`, no `opacity` con transición.

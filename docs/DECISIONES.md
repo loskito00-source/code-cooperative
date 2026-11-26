@@ -299,3 +299,16 @@ siempre tendrá la misma estructura".
   hijo con `closure` = el de afuera): no pisan ni dejan variables afuera. Solo listas (no dict/set ni generadores).
 - Para la velocidad por tamaño del código, una comprensión cuenta como parte de la instrucción donde está (es más
   compacta que un for, igual que en Python).
+
+## Dos terminales por servidor y barra de ventanas minimizadas
+
+- En línea, cada servidor tiene **dos terminales**: la de cada jugador, cada una con su propia sesión (carpeta,
+  historial y procesos como `top` o `tail -f` por separado). Las dos son la misma máquina: archivos, red, ataques y
+  todo lo demás se comparte en tiempo real. **Los dos pueden leer y escribir en las dos** (el usuario lo aclaró: no es
+  "solo ver"), y lo que escribe cualquiera se ve en vivo. Las corre el anfitrión (sesiones `host` y `guest`); los
+  mensajes `term`, `term-out` y `term-typing` llevan `slot`. Botón "⇄" en la barra de título para saltar de una a la
+  otra; en el explorador salen las dos ("servidor" y "servidor · Nombre"). En local hay una sola.
+- Al minimizar, la ventana ya no queda flotando: desaparece y queda un botón en la **barra de abajo** (`.minibar`, en el
+  orden en que se minimizaron). Al darle clic vuelve con la misma posición y tamaño. La posición se lee del estilo
+  (`left`/`top`), no de `offsetLeft`, que da 0 en una ventana que no se dibuja (eso también arregla que una ventana
+  cerrada guardara la posición 0).

@@ -545,7 +545,8 @@ Inspirado en The Farmer Was Replaced: el juego ocupa toda la pantalla y el códi
 | Ventana: Lupe       |                                   tiquete  |
 +---------------------+--------------------------------------------+
 ```
-- Cada ventana se arrastra por su barra, cambia de tamaño por la esquina, se minimiza (doble clic en la barra) y se cierra. Las posiciones se guardan.
+- Cada ventana se arrastra por su barra, cambia de tamaño por la esquina, se minimiza (botón o doble clic en la barra) y se cierra. Minimizada queda como un botón en la barra de abajo; al darle clic vuelve a su misma posición y tamaño. Las posiciones se guardan.
+- En línea, cada servidor tiene dos terminales (una por jugador, cada una con su sesión y sus procesos); los dos pueden usar las dos y todo se ve en vivo.
 - Hacer clic en un robot en la tienda abre su ventana y la trae al frente.
 - La tienda se centra sola en el espacio que dejan libre las ventanas.
 
