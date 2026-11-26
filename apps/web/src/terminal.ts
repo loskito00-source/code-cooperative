@@ -54,6 +54,11 @@ export class TerminalWindow {
   private readonly liveEl: HTMLElement;
   private histIdx = -1;
   private timer: number | null = null;
+  /** false = el jugador subió a leer: nada la baja sola hasta que vuelva al final o dé Enter. */
+  private follow = true;
+  /** Dónde la dejó el jugador y cuándo la movió él (rueda, barra, teclado). */
+  private userTop = 0;
+  private userScrollAt = 0;
 
   constructor(readonly win: FloatingWindow, world: World, serverId: string, private readonly onRun: () => void, private readonly link: TermLink = {}) {
     this.shell = link.send ? null : world.shell(serverId);
@@ -80,6 +85,22 @@ export class TerminalWindow {
     box.addEventListener("pointerdown", (e) => {
       const onScrollbar = e.offsetX > box.clientWidth || e.offsetY > box.clientHeight;
       down = e.button === 0 && !onScrollbar ? { x: e.clientX, y: e.clientY } : null;
+    });
+    // el scroll lo manda el jugador: si sube, la terminal se queda donde la dejó aunque llegue salida nueva o el
+    // navegador quiera mostrar la línea de comando; si baja hasta el final, vuelve a seguir la salida
+    const mark = () => (this.userScrollAt = performance.now());
+    box.addEventListener("wheel", mark, { passive: true });
+    box.addEventListener("touchmove", mark, { passive: true });
+    box.addEventListener("pointerdown", mark);
+    box.addEventListener("keydown", (e) => ["PageUp", "PageDown", "Home", "End"].includes(e.key) && mark());
+    box.addEventListener("scroll", () => {
+      const byUser = performance.now() - this.userScrollAt < 800;
+      if (byUser) {
+        this.follow = this.atBottom();
+        this.userTop = box.scrollTop;
+      } else if (!this.follow && box.scrollTop !== this.userTop) {
+        box.scrollTop = this.userTop; // algo la movió sin que el jugador lo pidiera: se devuelve
+      }
     });
     box.addEventListener("pointerup", (e) => {
       const click = down && Math.abs(e.clientX - down.x) < 4 && Math.abs(e.clientY - down.y) < 4;
@@ -200,7 +221,7 @@ export class TerminalWindow {
     } else {
       this.liveEl.hidden = true;
       this.out.hidden = false;
-      this.scroll();
+      if (this.follow) this.scroll();
     }
   }
 
@@ -272,7 +293,7 @@ export class TerminalWindow {
 
   private print(lines: string[]): void {
     if (!lines.length) return;
-    const stick = this.atBottom();
+    const stick = this.follow;
     this.recent.push(...lines);
     if (this.recent.length > 300) this.recent.splice(0, this.recent.length - 300);
     const frag = document.createDocumentFragment();
@@ -322,11 +343,13 @@ export class TerminalWindow {
     this.timer = null;
     this.liveEl.hidden = true;
     this.out.hidden = false;
-    this.scroll();
+    if (this.follow) this.scroll();
   }
 
+  /** Baja al final y vuelve a seguir la salida. */
   private scroll(): void {
     const box = this.win.body.querySelector(".term")!;
+    this.follow = true;
     box.scrollTop = box.scrollHeight;
   }
 

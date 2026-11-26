@@ -513,11 +513,18 @@ function refreshScript(force = false): void {
   const box = $(".script-console", scriptWin.body);
   const key = `${scriptRun.console.length}:${scriptRun.console.at(-1)?.text.length ?? 0}`;
   if (!force && key === scriptRun.consoleKey) return;
+  // si subió a leer algo, no se redibuja (eso lo bajaba o le movía el texto); sigue cuando vuelva al final
+  if (!force && scriptRun.console.length && !consoleAtBottom(box)) return;
   scriptRun.consoleKey = key;
   box.innerHTML = scriptRun.console.length
     ? scriptRun.console.map((l) => `<div class="line ${l.kind}">${escapeHtml(l.text)}</div>`).join("")
     : `<div class="line empty">Presiona ▶ Ejecutar para correr el script. Lo que imprimas con print() sale aquí.</div>`;
   box.scrollTop = box.scrollHeight;
+}
+
+/** ¿La consola está mostrando el final? (con un margen: casi al final cuenta como al final) */
+function consoleAtBottom(box: HTMLElement): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 24;
 }
 setInterval(() => db.ready && void db.flush(), 1000);
 
@@ -998,18 +1005,24 @@ function renderConsole(cw: CodeWindow, lines: ConsoleLine[] | null): void {
   const box = cw.console;
   const key = lines ? `${lines.length}:${lines.at(-1)?.tick ?? 0}` : "shared";
   if (key === cw.consoleKey) return;
-  cw.consoleKey = key;
   if (!lines) {
+    cw.consoleKey = key;
     box.innerHTML = `<div class="line empty">shared.py no se ejecuta solo: los robots lo usan con import shared.</div>`;
     return;
   }
   if (lines.length === 0) {
+    cw.consoleKey = key;
     box.innerHTML = `<div class="line empty">Consola vacía. Usa print() para ver qué está pasando.</div>`;
     return;
   }
-  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+  // si subió a leer algo, la consola se queda quieta (antes se redibujaba con cada print y le movía el texto o lo
+  // bajaba); se pone al día cuando vuelve al final
+  // (salvo que la consola se haya vaciado: el robot se volvió a ejecutar)
+  const prevLen = Number(cw.consoleKey.split(":")[0]) || 0;
+  if (box.childElementCount > 1 && lines.length >= prevLen && !consoleAtBottom(box)) return;
+  cw.consoleKey = key;
   box.innerHTML = lines.slice(-80).map((l) => `<div class="line ${l.kind}">${escapeHtml(l.text)}</div>`).join("");
-  if (atBottom) box.scrollTop = box.scrollHeight;
+  box.scrollTop = box.scrollHeight;
 }
 
 const ARTICLES: Record<string, [string, boolean]> = {

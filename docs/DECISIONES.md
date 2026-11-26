@@ -323,3 +323,8 @@ siempre tendrá la misma estructura".
   sí vuelve al final.
 - Editor de código: con el zoom de la ventana CodeMirror podía quedarse con la altura de línea vieja y la selección con
   el mouse tomaba otras líneas; un `ResizeObserver` sobre el contenido le pide volver a medir.
+- El scroll seguía bajándose solo. La terminal ahora recuerda si el jugador subió a leer (`follow`): la salida nueva no
+  la baja, y si algo más la mueve sin que el jugador lo pida (rueda, barra, teclado), vuelve a donde estaba. Al bajar
+  hasta el final o dar Enter, vuelve a seguir la salida. La consola de los robots y la de inventario.py se redibujaban
+  con cada `print` (la de inventario.py siempre bajaba al final): ahora, si el jugador subió, se quedan quietas hasta
+  que vuelva al final (o hasta que el robot se vuelva a ejecutar).
