@@ -313,7 +313,7 @@ button:focus-visible { outline: 3px solid var(--letrero); outline-offset: 2px; }
 .editor .cm-tooltip-autocomplete ul li[aria-selected] { background: #3d5246; color: var(--tiza); }
 
 .console {
-  flex: none; height: 28%; min-height: 64px; overflow-y: auto; padding: 8px 12px; font: var(--fs-data)/1.55 var(--f-code);
+  flex: none; height: var(--pane-h, 28%); min-height: 0; overflow-y: auto; padding: 8px 12px; font: var(--fs-data)/1.55 var(--f-code);
   background: rgba(0, 0, 0, 0.25); border-top: 1px dashed rgba(238, 240, 230, 0.16);
 }
 .console .line { white-space: pre-wrap; }
@@ -337,11 +337,15 @@ button:focus-visible { outline: 3px solid var(--letrero); outline-offset: 2px; }
 .editor .cm-bp-gutter .cm-gutterElement:has(.cm-bp) .cm-bp-empty { display: none; }
 .cm-bp { width: 12px; height: 12px; border-radius: 50%; background: var(--rojo); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25); }
 
+/* barra para agrandar o achicar la consola (se arrastra) */
+.pane-grip { flex: none; height: 8px; position: relative; background: rgba(0, 0, 0, 0.18); cursor: row-resize; touch-action: none; }
+.pane-grip::after { content: ""; position: absolute; left: 50%; top: 3px; width: 44px; height: 3px; margin-left: -22px; border-radius: 2px; background: var(--tiza-tenue); opacity: 0.35; }
+.pane-grip:hover::after, .pane-grip.dragging::after { opacity: 0.9; }
 .pane-tabs { display: flex; gap: 2px; align-items: center; padding: 0 8px; background: rgba(0, 0, 0, 0.18); border-top: 1px dashed rgba(238, 240, 230, 0.16); flex: none; }
 .pane-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--tiza-tenue); padding: 5px 10px; font-size: var(--fs-sm); font-weight: 500; }
 .pane-tabs button.on { color: var(--tiza); border-bottom-color: var(--tiza); }
 .pane-hint { margin-left: auto; font-size: var(--fs-sm); color: #6f8075; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vars { flex: none; height: 28%; min-height: 64px; overflow: auto; background: rgba(0, 0, 0, 0.25); font: var(--fs-ui)/1.5 var(--f-code); }
+.vars { flex: none; height: var(--pane-h, 28%); min-height: 0; overflow: auto; background: rgba(0, 0, 0, 0.25); font: var(--fs-ui)/1.5 var(--f-code); }
 .vars table { width: 100%; border-collapse: collapse; }
 .vars th { position: sticky; top: 0; background: #26332c; text-align: left; font: 600 var(--fs-sm) var(--f-ui); color: var(--tiza-tenue); padding: 5px 10px; }
 .vars td { padding: 3px 10px; border-bottom: 1px solid rgba(238, 240, 230, 0.06); vertical-align: top; }

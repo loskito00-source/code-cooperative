@@ -251,3 +251,77 @@ export class FloatingWindow {
     return !this.el.hidden && !this.minimized;
   }
 }
+
+const PANES_KEY = "cdb.panes.v1";
+
+/**
+ * Barra para cambiar la altura del panel de abajo de una ventana (la consola y las variables de las ventanas de
+ * código): se arrastra hacia arriba o hacia abajo y doble clic vuelve al tamaño normal. La altura queda en la
+ * variable CSS `--pane-h` del cuerpo de la ventana y se guarda por ventana en `cdb.panes.v1`.
+ */
+export function paneSplitter(win: FloatingWindow, before: HTMLElement, id: string): void {
+  const grip = document.createElement("div");
+  grip.className = "pane-grip";
+  grip.title = "Arrastra para cambiar el tamaño de la consola (doble clic: tamaño normal)";
+  grip.setAttribute("role", "separator");
+  grip.setAttribute("aria-orientation", "horizontal");
+  before.before(grip);
+
+  const load = (): Record<string, number> => {
+    try {
+      return JSON.parse(localStorage.getItem(PANES_KEY) ?? "{}");
+    } catch {
+      return {};
+    }
+  };
+  const store = (h: number | null) => {
+    const all = load();
+    if (h === null) delete all[id];
+    else all[id] = h;
+    try {
+      localStorage.setItem(PANES_KEY, JSON.stringify(all));
+    } catch {
+      /* sin almacenamiento */
+    }
+  };
+  const apply = (h: number | null) => {
+    if (h === null) win.body.style.removeProperty("--pane-h");
+    else win.body.style.setProperty("--pane-h", `${Math.round(h)}px`);
+  };
+  const saved = load()[id];
+  if (typeof saved === "number") apply(saved);
+
+  /** Altura actual del panel visible (consola o variables). */
+  const current = (): number => {
+    const pane = [...win.body.children].find((el) => (el.classList.contains("console") || el.classList.contains("vars")) && !(el as HTMLElement).hidden) as HTMLElement | undefined;
+    return pane?.offsetHeight ?? 0;
+  };
+
+  grip.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startH = current();
+    const sy = e.clientY;
+    // lo que no puede tapar el panel: la barra de botones, las pestañas y un poco de editor
+    const max = Math.max(0, win.body.clientHeight - 130);
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add("dragging");
+    let h = startH;
+    const onMove = (ev: PointerEvent) => {
+      h = Math.max(0, Math.min(max, startH - (ev.clientY - sy)));
+      apply(h);
+    };
+    const onUp = () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+      grip.classList.remove("dragging");
+      store(h);
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+  });
+  grip.addEventListener("dblclick", () => {
+    apply(null);
+    store(null);
+  });
+}

@@ -675,6 +675,11 @@ export class World {
       this.sound("error", robot);
       return;
     }
+    // si el cajero vuelve a empezar con el mismo cliente (se equivocó en el código y lo ejecuta de nuevo), la
+    // atención empieza desde cero: el cliente sigue con sus productos y se le puede volver a escanear y cobrar
+    const reg = this.registerAt(robot.x, robot.y);
+    const waiting = reg?.queue[0];
+    if (waiting && !waiting.checkout.done) waiting.checkout = { scanned: 0, charged: null, paid: null, change: null, done: false };
     robot.cpu.lastOps = 0;
     robot.cpu.lastBudget = 0;
     robot.cpu.clock = 0;

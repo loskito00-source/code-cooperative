@@ -259,3 +259,23 @@ siempre tendrá la misma estructura".
 - El anfitrión guarda cada 45 s y al cambiar de día: el mundo (`encodeWorld`, con el disco de los servidores), el código (estado de Yjs) y la base del jugador con **pg_dump** de pglite-tools (unos KB; el volcado binario pesaba 4,5 MB).
 - Si el anfitrión se va, el otro recarga y sigue desde el último guardado. `#partida=ABCD` en la dirección entra directo.
 - Bug arreglado: el almacén salía lleno (40/30/36) antes de registrar la mercancía; ahora empieza vacío y se llena desde la tabla de inventario del jugador.
+
+## Base y terminal en vivo, fondo fijo, consola ajustable, scan_item y depurador
+
+- "La base de datos no es en tiempo real": `GameDB.onChange` avisa cada vez que cambian las tablas del jugador
+  (sentencias que no son de lectura, `cursor.execute` de los robots, descontar del almacén, cargar o borrar). La ventana
+  Base de datos refresca la lista de tablas y vuelve a correr sola la última consulta de lectura (máx. ~1 vez/s). En
+  línea, el anfitrión le manda `db-changed` al otro jugador, que hace lo mismo.
+- "La terminal tampoco está en tiempo real": la línea de comando es compartida; lo que escribe uno le aparece al otro
+  mientras escribe (`term-typing`), no solo al dar Enter. Las contraseñas no se comparten.
+- "Al mover las ventanas se mueve el fondo": la tienda se encuadraba según la posición de las ventanas de código en cada
+  cuadro. Ahora ese ancho se mide una vez (al mostrar la tienda y al cambiar el tamaño del navegador); el explorador sí
+  la sigue corriendo.
+- La consola/variables de las ventanas de código (y la salida de inventario.py) se agrandan o achican arrastrando la
+  barrita de encima (doble clic: tamaño normal). Se guarda en `cdb.panes.v1`.
+- Bug "scan_item no reconoce los productos del cliente" (también con el cliente de prueba): si el código se detenía o
+  se volvía a ejecutar (o se usaba el paso a paso) después de escanear, el segundo `scan_item()` devolvía `[]`. Ahora
+  siempre devuelve el carrito completo. Además, al ejecutar de nuevo un robot parado en una caja, la atención del
+  cliente que está ahí empieza desde cero (`World.runRobot` limpia su `checkout` si la venta no se cerró): se le puede
+  volver a escanear, cobrar y dar la devuelta.
+- "Con el paso a paso el juego se pausa": el depurador ya no pausa la tienda; solo se detiene ese robot.

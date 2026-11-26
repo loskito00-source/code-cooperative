@@ -13,7 +13,7 @@ import { SqlWindow } from "./sqlwindow.js";
 import { TerminalWindow } from "./terminal.js";
 import { MainMenu } from "./start.js";
 import { type PlaceKind, Store3D } from "./store3d.js";
-import { FloatingWindow, leftInset, topInset } from "./windows.js";
+import { FloatingWindow, leftInset, paneSplitter, topInset } from "./windows.js";
 import { Collab } from "./online/collab.js";
 import { FORWARD, GuestSync, HostSync, isGuest, isOnline, session, wrapDb, wrapWorld } from "./online/gamesync.js";
 import { loadPlayer } from "./online/player.js";
@@ -249,6 +249,7 @@ function makeCodeWindow(id: string, title: string, color: string | null, box: { 
       if (isGuest()) void session.room?.call("bp", { r: id, lines });
     },
   });
+  if (!isShared) paneSplitter(win, $(".pane-tabs", win.body), `code-${id}`);
   cw.runBtn.addEventListener("click", () => run(id));
   cw.stopBtn.addEventListener("click", () => stop(id));
   cw.pauseBtn.addEventListener("click", () => togglePause(id));
@@ -266,21 +267,16 @@ function makeCodeWindow(id: string, title: string, color: string | null, box: { 
 function run(id: string): void {
   if (id === "shared") world.robots.forEach((r) => world.runRobot(r.id));
   else world.runRobot(id);
-  endDebugPause();
   refreshUi(true);
 }
 
 function stop(id: string): void {
   if (id === "shared") world.robots.forEach((r) => world.stopRobot(r.id));
   else world.stopRobot(id);
-  endDebugPause();
   refreshUi(true);
 }
 
 // ── depurador ────────────────────────────────────────────────
-
-/** Velocidad que había antes de que un robot se detuviera en el depurador. */
-let speedBeforeDebug: number | null = null;
 
 function showPane(cw: CodeWindow, pane: CodeWindow["pane"]): void {
   cw.pane = pane;
@@ -291,12 +287,9 @@ function showPane(cw: CodeWindow, pane: CodeWindow["pane"]): void {
   refreshUi(true);
 }
 
-/** Cuando un robot se detiene en el depurador, el mundo entero se pausa para revisar con calma. */
+/** Cuando un robot se detiene en el depurador se muestran sus variables. El juego sigue corriendo (el usuario no
+ * quiere que el depurador pause la tienda: solo se detiene ese robot). */
 function onRobotPaused(id: string): void {
-  if (speed > 0 && !isGuest()) {
-    speedBeforeDebug = speed;
-    setSpeed(0);
-  }
   const cw = codeWindows.get(id);
   if (cw) {
     cw.win.show();
@@ -304,12 +297,6 @@ function onRobotPaused(id: string): void {
   }
   selected = id;
   refreshDock();
-}
-
-function endDebugPause(): void {
-  const anyPaused = world.robots.some((r) => r.vm?.status === "paused");
-  if (!anyPaused && speedBeforeDebug !== null && speed === 0) setSpeed(speedBeforeDebug);
-  if (!anyPaused) speedBeforeDebug = null;
 }
 
 function togglePause(id: string): void {
@@ -321,8 +308,7 @@ function togglePause(id: string): void {
   if (!vm) return;
   if (vm.status === "paused") {
     vm.resume();
-    endDebugPause();
-  } else {
+    } else {
     vm.pause();
     if (speed === 0) advanceUntilPaused(id);
   }
@@ -393,6 +379,18 @@ const dbWin = new FloatingWindow(layer, {
   width: Math.min(980, window.innerWidth - codeW - 60), height: Math.min(600, H - 100), minWidth: 560, minHeight: 320, open: false,
 });
 const sqlWin = new SqlWindow(dbWin, db);
+/** Último aviso de "la base cambió" que el anfitrión le mandó al otro jugador. */
+let dbNotifyTimer: number | null = null;
+// la base cambió (aquí, por el otro jugador o por un robot): se refresca la ventana y, en línea, la del otro jugador
+db.onChange(() => {
+  sqlWin.refreshSoon();
+  const room = session.room;
+  if (!room || isGuest() || dbNotifyTimer !== null) return;
+  dbNotifyTimer = window.setTimeout(() => {
+    dbNotifyTimer = null;
+    room.send("db-changed", null);
+  }, 300);
+});
 // las consultas de los robots, de pandas y de inventario.py corren como el rol jugador
 world.sql = { query: (sql, params) => db.playerQuery(sql, params) };
 
@@ -428,6 +426,7 @@ scriptWin.body.innerHTML = `
   <div class="editor"></div>
   <div class="pane-tabs"><button class="on">Salida</button><span class="pane-hint">print(hoja) muestra la hoja aquí</span></div>
   <div class="console script-console"></div>`;
+paneSplitter(scriptWin, $(".pane-tabs", scriptWin.body), "code-inventario");
 const scriptEditor = new CodeEditor({
   parent: $(".editor", scriptWin.body),
   doc: scripts.inventario,
@@ -550,14 +549,17 @@ function terminalFor(serverId: string): TerminalWindow {
       },
       // en línea: el anfitrión corre los comandos de los dos y publica la salida; el espejo manda lo que escribe
       !room ? {} : isGuest()
-        ? { send: (input) => void room.call("term", { s: serverId, ...input }).catch((e: Error) => toast(e.message, "bad")) }
-        : { publish: (out) => room.send("term-out", { s: serverId, out }) },
+        ? {
+            send: (input) => void room.call("term", { s: serverId, ...input }).catch((e: Error) => toast(e.message, "bad")),
+            typing: (text) => room.send("term-typing", { s: serverId, text }),
+          }
+        : { publish: (out) => room.send("term-out", { s: serverId, out }), typing: (text) => room.send("term-typing", { s: serverId, text }) },
     );
     terminals.set(serverId, t);
     if (room && isGuest()) {
       // lo que ya estaba escrito en la terminal del anfitrión
       const tw = t;
-      void room.call<{ lines: string[]; prompt: string; hostname: string }>("term", { s: serverId, hello: true }).then((r) => tw.show({ lines: r.lines, prompt: r.prompt, hostname: r.hostname }));
+      void room.call<{ lines: string[]; prompt: string; hostname: string }>("term", { s: serverId, hello: true }).then((r) => tw.show({ lines: r.lines, clear: true, prompt: r.prompt, hostname: r.hostname }));
     }
     watchWindow(win);
   }
@@ -1257,19 +1259,28 @@ refreshUi(true);
 
 let lastRealMs = performance.now();
 const gameEl = $("#game");
+/** Ancho que tapaban las ventanas de código al encuadrar la tienda (null = medirlo de nuevo). */
+let codeCover: number | null = null;
+window.addEventListener("resize", () => (codeCover = null));
 const store = new Store3D(gameEl, {
   world: () => world,
   selected: () => selected,
   onSelect: (id: string) => select(id),
   onEvents,
-  /** Parte izquierda de la pantalla tapada por las ventanas de código: la tienda se centra en el resto. */
+  /**
+   * Parte izquierda de la pantalla que tapan el explorador y las ventanas de código: la tienda se centra en el resto.
+   * Lo que tapan las ventanas se mide una sola vez (y al cambiar el tamaño del navegador): si se recalculara en cada
+   * cuadro, arrastrar o cerrar una ventana movería la tienda de fondo (el usuario lo reportó como bug).
+   */
   leftInset: () => {
-    // el explorador de archivos también tapa la izquierda
-    let right = leftInset() - 6;
-    for (const win of [...[...codeWindows.values()].map((cw) => cw.win), scriptWin]) {
-      if (win.isOpen && win.el.offsetLeft < window.innerWidth / 2) right = Math.max(right, win.el.offsetLeft + win.el.offsetWidth);
+    if (codeCover === null) {
+      codeCover = 0;
+      for (const win of [...[...codeWindows.values()].map((cw) => cw.win), scriptWin]) {
+        if (win.isOpen && win.el.offsetLeft < window.innerWidth / 2) codeCover = Math.max(codeCover, win.el.offsetLeft + win.el.offsetWidth);
+      }
     }
-    return right;
+    // el explorador de archivos se abre y se cierra con su botón: ese sí corre la tienda
+    return Math.max(leftInset() - 6, codeCover);
   },
   onCue: (cue: string) => audio.cue(cue),
   onRack: (slot: number) => void onRack(slot),
@@ -1650,10 +1661,12 @@ async function openStore(animated: boolean): Promise<void> {
   if (animated) {
     audio.cue("open");
     for (const w of [scriptWin, sheetWin, dbWin]) w.close();
+    codeCover = null;
     await store.flyToStore();
   } else {
     // partida guardada que ya estaba abierta: la cámara seguía girando como en el menú principal
     boxesUnloaded = true;
+    codeCover = null; // se vuelve a medir con las ventanas como quedaron
     store.showStore();
   }
   await Promise.race([syncWarehouse(), new Promise((r) => setTimeout(r, 15000))]); // sin base, no se traba
@@ -2062,6 +2075,10 @@ async function startOnline(choice: OnlineChoice): Promise<boolean> {
   const collab = new Collab(room, choice.player);
   session.collab = collab;
   room.on("flow", ({ k }: { k: string }) => onRemoteFlow(k));
+  // la línea de comando de las terminales: lo que el otro va escribiendo
+  room.on("term-typing", ({ s, text }: { s: string; text: string }) => {
+    if (session.mode !== "local") terminalFor(s).showTyping(text); // (aún sin saber si somos anfitrión: se ignora)
+  });
   linkAssembly(room);
   knownPlayers.add(choice.player.name);
   location.hash = `partida=${choice.id}`;
@@ -2126,6 +2143,7 @@ async function startAsGuest(room: Room, collab: Collab, choice: OnlineChoice, sc
   const phase = await room.call<string>("phase", null, 8000).catch(() => "playing");
   guestSync = new GuestSync(room, world, applyMeta);
   room.on("term-out", ({ s, out }: { s: string; out: Parameters<TerminalWindow["show"]>[0] }) => terminalFor(s).show(out));
+  room.on("db-changed", () => sqlWin.refreshSoon());
   if (phase === "naming") {
     screen.remove();
     await nameRobotsTogether(room, startingRobots(), choice.id);

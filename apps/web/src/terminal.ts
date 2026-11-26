@@ -30,6 +30,8 @@ export interface TermLink {
   publish?: (out: TermOut) => void;
   /** Espejo: lo que escribe va al anfitrión (que la corre en su terminal). */
   send?: (input: { text?: string; ctrl?: "c" }) => void;
+  /** Los dos: lo que va escribiendo en la línea de comando (antes de Enter), para que el otro lo vea en vivo. */
+  typing?: (text: string) => void;
 }
 
 /**
@@ -71,6 +73,8 @@ export class TerminalWindow {
       if (!window.getSelection()?.toString()) this.inputEl.focus();
     });
     this.inputEl.addEventListener("keydown", (e) => this.key(e));
+    // la línea de comando es compartida: lo que escribe uno le aparece al otro mientras escribe
+    this.inputEl.addEventListener("input", () => this.shareTyping());
     win.onShow = () => setTimeout(() => this.inputEl.focus(), 0);
   }
 
@@ -99,6 +103,7 @@ export class TerminalWindow {
       const text = this.inputEl.value;
       this.inputEl.value = "";
       this.histIdx = -1;
+      this.link.typing?.("");
       this.exec(text);
       return;
     }
@@ -110,6 +115,7 @@ export class TerminalWindow {
       if (e.key === "ArrowUp") this.histIdx = this.histIdx < 0 ? h.length - 1 : Math.max(0, this.histIdx - 1);
       else this.histIdx = this.histIdx < 0 ? -1 : this.histIdx + 1 >= h.length ? -1 : this.histIdx + 1;
       this.inputEl.value = this.histIdx < 0 ? "" : h[this.histIdx];
+      this.shareTyping();
       return;
     }
     if (e.key === "Tab") {
@@ -118,11 +124,26 @@ export class TerminalWindow {
     }
   }
 
+  private shareTyping(): void {
+    if (this.inputEl.type === "password") return; // las contraseñas no se muestran
+    this.link.typing?.(this.inputEl.value);
+  }
+
+  /** En línea: lo que el otro jugador va escribiendo en la línea de comando. */
+  showTyping(text: string): void {
+    if (this.inputEl.type === "password") return;
+    if (this.inputEl.value === text) return;
+    const atEnd = this.inputEl.selectionStart === this.inputEl.value.length;
+    this.inputEl.value = text;
+    if (atEnd && document.activeElement === this.inputEl) this.inputEl.setSelectionRange(text.length, text.length);
+  }
+
   /** Corre una línea (la escribió este jugador o, en línea, el otro) y la publica. */
   exec(text: string): void {
     const sh = this.shell;
     if (!sh) return;
     const res = sh.input(text);
+    this.inputEl.value = ""; // lo que corrió el otro jugador también estaba en esta línea
     if (res.clear) {
       this.out.innerHTML = "";
       this.recent.length = 0;
@@ -187,6 +208,7 @@ export class TerminalWindow {
       this.inputEl.value = "";
       this.histIdx = -1;
       if (text.trim() && this.inputEl.type !== "password") this.remoteHistory.push(text);
+      this.link.typing?.("");
       this.link.send?.({ text });
       return;
     }
@@ -197,6 +219,7 @@ export class TerminalWindow {
       if (e.key === "ArrowUp") this.histIdx = this.histIdx < 0 ? h.length - 1 : Math.max(0, this.histIdx - 1);
       else this.histIdx = this.histIdx < 0 ? -1 : this.histIdx + 1 >= h.length ? -1 : this.histIdx + 1;
       this.inputEl.value = this.histIdx < 0 ? "" : h[this.histIdx];
+      this.shareTyping();
     }
   }
 
@@ -220,8 +243,11 @@ export class TerminalWindow {
       words[words.length - 1] = options[0] + (options[0].endsWith("/") ? "" : " ");
       this.inputEl.value = words.join(" ");
     } else if (options.length > 1) {
-      this.print([this.shell.prompt() + v, options.join("  ")]);
+      const lines = [this.shell.prompt() + v, options.join("  ")];
+      this.print(lines);
+      this.link.publish?.({ lines, prompt: this.shell.prompt(), hostname: this.shell.server.hostname });
     }
+    this.shareTyping();
   }
 
   private print(lines: string[]): void {

@@ -175,17 +175,21 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
     // en una caja: su fila; fuera de las cajas: todos los que esperan
     queue_length: fn("queue_length", () => world.registerAt(robot.x, robot.y)?.queue.length ?? world.queue.length),
 
-    /** Escanea todo lo que queda en el carrito y devuelve la lista de productos. 2 ticks por producto (1 con GPU). */
+    /**
+     * Escanea el carrito del cliente y devuelve la lista de productos. 2 ticks por producto (1 con GPU).
+     * Siempre devuelve el carrito completo: si el código se detuvo o se volvió a ejecutar después de escanear (o
+     * se usó el paso a paso), volver a escanear no puede dejar al cliente "sin productos".
+     */
     scan_item: fn("scan_item", () => {
       const c = customer("scan_item");
       if (!c) return new Action(TICKS.failed, () => new PyList([]));
-      const rest = c.cart.slice(c.checkout.scanned);
-      if (rest.length) world.sound("scan", robot);
+      const items = [...c.cart];
+      if (items.length) world.sound("scan", robot);
       // con GPU en su servidor, la visión por computador escanea el doble de rápido
       const perItem = world.serverOf(robot)?.gpu ? TICKS.scanPerItem / 2 : TICKS.scanPerItem;
-      return act(`🔎 escaneando ${rest.length}`, Math.max(1, Math.ceil(perItem * rest.length)), () => {
+      return act(`🔎 escaneando ${items.length}`, Math.max(1, Math.ceil(perItem * items.length)), () => {
         c.checkout.scanned = c.cart.length;
-        return new PyList(rest);
+        return new PyList(items);
       });
     }),
 

@@ -72,6 +72,13 @@ export class SqlError extends Error {
   }
 }
 
+/** ¿La sentencia solo lee? (sin comentarios; varias sentencias: todas tienen que ser de lectura). */
+function readOnly(sql: string): boolean {
+  const clean = sql.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const parts = clean.split(";").map((p) => p.trim()).filter(Boolean);
+  return parts.every((p) => /^(SELECT|SHOW|EXPLAIN|VALUES|TABLE)\b/i.test(p) && !/\bINTO\b/i.test(p));
+}
+
 function checkAllowed(sql: string): void {
   if (FORBIDDEN.some((re) => re.test(sql))) {
     throw new SqlError(
@@ -97,7 +104,22 @@ export class GameDB {
    */
   private exporting: Promise<unknown> = Promise.resolve();
 
+  /** Cuántas veces cambiaron las tablas del jugador (para refrescar las vistas, también las del otro jugador). */
+  version = 0;
+  private readonly changeListeners = new Set<() => void>();
+
   constructor(private readonly world: World) {}
+
+  /** Avisa cada vez que cambian las tablas del jugador (CREATE, INSERT, UPDATE, DELETE...). Devuelve cómo dejar de oír. */
+  onChange(fn: () => void): () => void {
+    this.changeListeners.add(fn);
+    return () => this.changeListeners.delete(fn);
+  }
+
+  private changed(): void {
+    this.version++;
+    for (const fn of this.changeListeners) fn();
+  }
 
   get ready(): boolean {
     return this.pg !== null;
@@ -220,6 +242,7 @@ export class GameDB {
     try {
       checkAllowed(sql);
       const results = await this.asPlayer((tx) => tx.exec(sql));
+      if (!readOnly(sql)) this.changed();
       const ms = Math.round(performance.now() - t0);
       const last = [...results].reverse().find((r) => r.fields.length > 0);
       if (!last) {
@@ -247,6 +270,7 @@ export class GameDB {
     checkAllowed(sql);
     try {
       const res = await this.asPlayer((tx) => tx.query<Record<string, unknown>>(sql, params));
+      if (!readOnly(sql)) this.changed();
       return { rows: res.rows, fields: res.fields.map((f) => f.name), affectedRows: res.affectedRows ?? 0 };
     } catch (e) {
       const detail = (e as Error).message ?? String(e);
@@ -321,12 +345,14 @@ export class GameDB {
     const ids = await pg.query<{ id: number; name: string }>("SELECT id, name FROM registro.products");
     this.productIds.clear();
     for (const r of ids.rows) this.productIds.set(r.name, Number(r.id));
+    this.changed();
   }
 
   /** Borra todas las tablas del jugador (para empezar el diseño de cero). */
   async resetPlayerSchema(): Promise<void> {
     await this.whenReady();
     await this.pg!.exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT USAGE, CREATE ON SCHEMA public TO jugador;");
+    this.changed();
   }
 
   /** ¿Ya hay una tabla del jugador con los productos del distribuidor, sin repetidos ni la fila TOTAL? */
@@ -405,6 +431,7 @@ export class GameDB {
         [product, quantity],
       ),
     );
+    this.changed();
   }
 
   /** Tablas y columnas (para el panel lateral y el autocompletado). */

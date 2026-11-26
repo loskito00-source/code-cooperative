@@ -557,7 +557,8 @@ Inspirado en The Farmer Was Replaced: el juego ocupa toda la pantalla y el códi
 ## Depurador
 - Punto de parada: clic a la izquierda del número de línea (punto rojo). El robot se detiene antes de ejecutar esa línea.
 - Botones por ventana: Ejecutar/Reiniciar, Pausar/Continuar (F8), Paso (F10, una línea), Detener.
-- Al detenerse un robot, el tiempo de la tienda se pausa solo; al continuar vuelve a la velocidad anterior.
+- Al detenerse un robot, solo se detiene ese robot: la tienda sigue corriendo (los clientes siguen llegando).
+- La consola y las variables se agrandan o se achican arrastrando la barra que tienen encima.
 - Pestaña Variables: nombre, valor y tipo de cada variable (locales de la función y globales del script).
 - La línea pausada se marca en amarillo y el robot muestra un globo "⏸ línea N" en la tienda.
 
@@ -770,7 +771,7 @@ S["appendices"] = {
 | get_shelves() | 2 | 0 | Lista de estantes |
 | shelf.stock() / shelf.product() / shelf.pos() | 2 | 0 | Datos del estante |
 | has_customer() | 1 | 0 | ¿Hay cliente en esta caja? |
-| scan_item() | 1 | 2/u | Escanea el carrito y devuelve la lista de productos |
+| scan_item() | 1 | 2/u | Escanea el carrito y devuelve la lista de productos (siempre el carrito completo, aunque se vuelva a escanear) |
 | price(item) | 1 | 0 | Precio unitario (o por kg) |
 | take_payment(total) | 1 | 2 | Cobra; devuelve lo que entrega el cliente |
 | give_change(x) | 2 | 3 | Devuelve un número (etapa 2) o un dict de denominaciones (etapa 3+) |

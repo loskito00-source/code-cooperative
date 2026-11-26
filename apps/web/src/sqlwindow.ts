@@ -25,6 +25,13 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
+/** ¿La consulta solo lee? (para volver a correrla sola cuando cambien los datos) */
+function isReadOnly(sql: string): boolean {
+  const clean = sql.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const parts = clean.split(";").map((p) => p.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((p) => /^(SELECT|SHOW|EXPLAIN|VALUES|TABLE)\b/i.test(p) && !/\bINTO\b/i.test(p));
+}
+
 function formatCell(v: unknown): { html: string; num: boolean } {
   if (v === null || v === undefined) return { html: '<span class="null">NULL</span>', num: false };
   if (v instanceof Date) return { html: v.toISOString().replace("T", " ").slice(0, 19), num: false };
@@ -45,6 +52,10 @@ export class SqlWindow {
   private tables: TableInfo[] = [];
   private confirmDelete: string | null = null;
   private running = false;
+  /** Última consulta de solo lectura que se mostró: se vuelve a correr sola cuando cambian los datos. */
+  private lastRead: string | null = null;
+  private refreshTimer: number | null = null;
+  private lastRefresh = 0;
 
   private readonly $ = <T extends HTMLElement>(sel: string) => this.win.body.querySelector(sel) as T;
 
@@ -91,6 +102,32 @@ export class SqlWindow {
     this.$(".db-saved").addEventListener("click", (e) => this.onSavedClick(e));
     this.$(".db-tables").addEventListener("click", (e) => this.onTableClick(e));
     this.renderSaved();
+    win.onShow = () => this.refreshSoon();
+  }
+
+  /**
+   * Cambiaron los datos (lo hizo este jugador, el otro o un robot): refresca la lista de tablas y, si la ventana está
+   * abierta, vuelve a correr la última consulta de lectura para que el resultado esté al día. Como máximo ~1 vez por
+   * segundo (un robot puede hacer muchos INSERT seguidos).
+   */
+  refreshSoon(): void {
+    if (this.refreshTimer !== null) return;
+    const wait = Math.max(0, 900 - (performance.now() - this.lastRefresh));
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = null;
+      this.lastRefresh = performance.now();
+      void this.refresh();
+    }, wait);
+  }
+
+  private async refresh(): Promise<void> {
+    if (!this.db.ready) return;
+    await this.init().catch(() => undefined);
+    if (!this.win.isOpen || this.running || !this.lastRead) return;
+    const text = this.lastRead;
+    const res = await this.db.run(text).catch(() => null);
+    // si mientras tanto el jugador corrió otra cosa, no se le pisa el resultado
+    if (res && res.ok && this.lastRead === text && !this.running) this.renderResult(res);
   }
 
   /** Llamar cuando la base esté lista: carga tablas y el autocompletado de columnas. */
@@ -111,6 +148,7 @@ export class SqlWindow {
     try {
       const res = await this.db.run(text);
       this.renderResult(res);
+      this.lastRead = res.ok && res.columns.length > 0 && isReadOnly(text) ? text : null;
       if (res.ok && /\b(CREATE|DROP|ALTER)\b/i.test(text)) await this.init();
     } finally {
       this.running = false;

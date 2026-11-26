@@ -636,6 +636,45 @@ describe("equipo: cajas y robots nuevos", () => {
   });
 });
 
+describe("scan_item", () => {
+  test("volver a escanear (código detenido o vuelto a ejecutar) devuelve otra vez todo el carrito", () => {
+    const w = mundo();
+    surtir(w);
+    w.startNight();
+    correr(w, 2);
+    const prueba = w.registers[0].queue[0];
+    expect(prueba.test).toBe(true);
+    w.setScript("lupe", "a = scan_item()\nb = scan_item()\nprint(len(a), len(b))");
+    w.runRobot("lupe");
+    correr(w, 100);
+    const n = prueba.cart.length;
+    expect(n).toBeGreaterThan(0);
+    expect(w.robot("lupe").console.map((l) => l.text)).toContain(`${n} ${n}`);
+  });
+
+  test("si el cajero se equivoca y se vuelve a ejecutar, el mismo cliente se puede escanear y cobrar de nuevo", () => {
+    const w = mundo();
+    surtir(w);
+    w.startNight();
+    correr(w, 2);
+    const prueba = w.registers[0].queue[0];
+    // primer intento: escanea y cobra, pero el código falla antes de dar la devuelta
+    w.setScript("lupe", "p = scan_item()\ntake_payment(1)\nx = 1 / 0");
+    w.runRobot("lupe");
+    correr(w, 100);
+    expect(prueba.checkout.paid).not.toBeNull();
+    // segundo intento con el código corregido: el mismo cliente, con todos sus productos
+    w.setScript("lupe", CAJERO);
+    w.runRobot("lupe");
+    const tiquetes: { id: number; n: number; ok: boolean }[] = [];
+    for (let i = 0; i < 100; i++) {
+      w.step();
+      for (const e of w.drainEvents()) if (e.type === "ticket") tiquetes.push({ id: e.ticket.customerId, n: e.ticket.items.length, ok: e.ticket.result === "ok" });
+    }
+    expect(tiquetes[0]).toEqual({ id: prueba.id, n: prueba.cart.length, ok: true });
+  });
+});
+
 /** ¿Quedó algún registro para la base de datos en los eventos pendientes? */
 function e_records(w: World): boolean {
   return w.drainEvents().some((e) => e.type === "record");

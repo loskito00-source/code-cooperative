@@ -108,13 +108,14 @@ await page.goto("http://localhost:5173", { waitUntil: "domcontentloaded" }); // 
 | `cdb.queries.v1` | Consultas SQL guardadas por el jugador |
 | `cdb.audio.v1` | Volumen de música/efectos y silencio |
 | `cdb.commands.v1` | Última categoría abierta en la ventana Comandos |
+| `cdb.panes.v1` | Altura de la consola/variables de cada ventana de código (barra arrastrable) |
 | `cdb.explorer.v1` | Explorador de archivos: `{ collapsed, closedFolders, closedSections }` (se conserva al recargar) |
 | `cdb.player.v1` | En línea: `{ id, name, color }` de este jugador |
 | `cdb.progress.v1` | `{ storeOpen, prepDone }`: si ya terminó la intro/misión y la primera noche |
 
 **Cada recarga empieza la partida desde 0** (lo pidió el usuario): al cargar `main.ts` borra `cdb.scripts.v1`,
 `cdb.progress.v1` y `cdb.queries.v1`, y la base PostgreSQL corre **en memoria** (antes estaba en IndexedDB). Solo se
-conservan el audio, las ventanas y el explorador. Para probar sin intro hay que poner `cdb.progress.v1` *después* de cargar y llamar
+conservan el audio, las ventanas (y la altura de sus consolas) y el explorador. Para probar sin intro hay que poner `cdb.progress.v1` *después* de cargar y llamar
 a `world.openStore()` (recargar lo borra).
 
 ## Estado y próximos pasos
