@@ -48,12 +48,46 @@ function statusOf(sql: string, affected: number): string {
 }
 
 /**
- * La conexión `db`, al estilo de asyncpg (sin await): ya viene conectada a la base de datos de la tienda.
- *   db.execute(sql, *args)  -> "INSERT 0 1"
- *   db.fetch(sql, *args)    -> lista de filas (diccionarios)
- *   db.fetchrow(sql, *args) -> una fila o None
- *   db.fetchval(sql, *args) -> un valor o None
- *   db.executemany(sql, lista_de_tuplas)
+ * `%s` (estilo psycopg) -> `$1, $2...` (PostgreSQL), sin tocar lo que va entre comillas. `%%` es un % literal.
+ * Si el SQL ya usa $1, se deja igual.
+ */
+export function placeholders(sql: string): string {
+  let out = "";
+  let n = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      out += ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+    } else if (ch === "%" && sql[i + 1] === "s") {
+      out += `$${++n}`;
+      i++;
+    } else if (ch === "%" && sql[i + 1] === "%") {
+      out += "%";
+      i++;
+    } else out += ch;
+  }
+  return out;
+}
+
+/** cursor.execute(sql, (a, b)) o cursor.execute(sql, a, b): los dos sirven. */
+function paramsOf(rest: Value[], line: number): unknown[] {
+  const list = rest.length === 1 && (rest[0] instanceof PyTuple || rest[0] instanceof PyList) ? rest[0].items : rest;
+  return list.map((a) => toJS(a, line));
+}
+
+/**
+ * La conexión `cursor` (también se llama `db`): ya viene conectada a la base de datos de la tienda, sin await.
+ * Los valores van con %s (o $1, $2...), nunca pegados al texto del SQL.
+ *   cursor.execute("INSERT INTO productos (nombre, cantidad) VALUES (%s, %s)", ("pan", 40))  -> "INSERT 0 1"
+ *   cursor.fetch(sql, valores)    -> lista de filas (diccionarios)
+ *   cursor.fetchrow(sql, valores) -> una fila o None
+ *   cursor.fetchval(sql, valores) -> un valor o None
+ *   cursor.executemany(sql, lista_de_tuplas)
  */
 export function makeDbConnection(getAdapter: () => SqlAdapter | undefined, onCall?: (sql: string) => void): HostObject {
   const adapter = (line: number) => {
@@ -62,8 +96,8 @@ export function makeDbConnection(getAdapter: () => SqlAdapter | undefined, onCal
     return a;
   };
   const needSql = (v: Value, fn: string, line: number): string => {
-    if (typeof v !== "string") throw new PyError(`db.${fn}() necesita el SQL como texto, por ejemplo db.${fn}("SELECT * FROM productos")`, line);
-    return v;
+    if (typeof v !== "string") throw new PyError(`cursor.${fn}() necesita el SQL como texto, por ejemplo cursor.${fn}("SELECT * FROM productos")`, line);
+    return placeholders(v);
   };
   const wrapError = (e: unknown, line: number): never => {
     throw new PyError(`SQL: ${(e as Error)?.message ?? String(e)}`, line);
@@ -71,7 +105,7 @@ export function makeDbConnection(getAdapter: () => SqlAdapter | undefined, onCal
   const call = (fn: string, handle: (res: Awaited<ReturnType<SqlAdapter["query"]>>, sql: string) => Value) =>
     new PyBuiltin(fn, (args, _kw, ctx) => {
       const sql = needSql(args[0], fn, ctx.line);
-      const params = args.slice(1).map((a) => toJS(a, ctx.line));
+      const params = paramsOf(args.slice(1), ctx.line);
       onCall?.(sql);
       const promise = adapter(ctx.line).query(sql, params).then((res) => handle(res, sql), (e) => wrapError(e, ctx.line));
       return Action.async(SQL_TICKS, promise);
@@ -87,7 +121,7 @@ export function makeDbConnection(getAdapter: () => SqlAdapter | undefined, onCal
       executemany: new PyBuiltin("executemany", (args, _kw, ctx) => {
         const sql = needSql(args[0], "executemany", ctx.line);
         const list = args[1];
-        if (!(list instanceof PyList)) throw new PyError("db.executemany() necesita una lista de filas, por ejemplo [(1, 'pan'), (2, 'leche')]", ctx.line);
+        if (!(list instanceof PyList)) throw new PyError("cursor.executemany() necesita una lista de filas, por ejemplo [(1, 'pan'), (2, 'leche')]", ctx.line);
         const rows = list.items.map((r) => (r instanceof PyTuple || r instanceof PyList ? r.items.map((x) => toJS(x, ctx.line)) : [toJS(r, ctx.line)]));
         onCall?.(sql);
         const a = adapter(ctx.line);

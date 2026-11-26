@@ -1,6 +1,15 @@
 export * from "./config.js";
 export * from "./world.js";
+export * from "./codesize.js";
+export * from "./persist.js";
 export { makeApi } from "./api.js";
 export * from "./delivery.js";
-export { makeDataFrame, makePandas, makeSeries } from "./pandas.js";
+export { makePandas } from "./pandas.js";
 export { makeDbConnection, type SqlAdapter } from "./sqlapi.js";
+export * from "./servers.js";
+export * from "./hardware.js";
+export * from "./network.js";
+export * from "./security.js";
+export { Shell, type ShellOutput, strongPassword, tokenize } from "./shell/shell.js";
+export { PACKAGES } from "./shell/system.js";
+export { forumPage } from "./shell/commands.js";

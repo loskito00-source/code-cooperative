@@ -100,3 +100,162 @@ parezca un menú de juego AAA", y arreglar que la barra del juego salía antes q
   láser barre la pantalla de arriba abajo. Polvo en el aire y grano de película.
 - Opciones: Entrar a la tienda (con barra de carga), Jugar en línea (bloqueada, "Pronto"), Cómo se juega, Opciones
   (volumen) y Créditos. Teclado (↑ ↓ Enter Esc), cursor que se desliza, sonidos propios (`ui-*`) y canción `portada`.
+
+## pandas mínimo + subir con SQL (cursor.execute)
+
+**Pedido:** primero "más sencillo, no tiene que ser 100% pandas" (se probó un pandas con comandos fáciles como
+`df.clean()` y `df.save()`); después lo cambió por: "para subir los datos haya que usar el cursor.execute y la consulta
+como tal de SQL", y de pandas solo **1)** leer el documento y **2)** elegir un rango tipo (A1, C3) que devuelva **una
+lista de diccionarios, uno por fila**, "y ya que el mismo usuario con las funciones de Python extraiga los datos y
+elimine los duplicados".
+- pandas tiene **solo** `pd.read_excel(archivo)` y `hoja.select("A1", "G6")` (o `"A1:G6"`). Se quitaron DataFrame,
+  Series, filtros, `to_sql`, `save`... No los vuelvas a agregar.
+- Las claves de cada diccionario son los **encabezados de la fila 1**; si el rango incluye la fila 1, no se devuelve
+  como dato. `print(hoja)` muestra la hoja con letras de columna y números de fila para elegir el rango.
+- La conexión se llama **`cursor`** (`db` sigue como alias por compatibilidad). Acepta `%s` con los valores en una
+  tupla (estilo psycopg) o `$1, $2...`.
+- Limpiar (repetidos, fila TOTAL, espacios, mayúsculas) es trabajo del jugador en Python; las pistas de la misión lo
+  orientan sin darle la solución.
+
+## Botón "Saltar" en la misión de inventario
+
+**Pedido:** "en la primera fase de la migración haya un botón que diga saltar para hacer un skip y saltar a la otra parte".
+- El panel de la misión "Organiza tu inventario" tiene **Saltar ⏭** debajo de "Abrir la tienda". Pide un segundo clic
+  de confirmación (4 s), sin diálogos del navegador.
+- Si el jugador no tiene ya un inventario limpio, `skipMission()` (`main.ts`) crea por él la tabla `inventario` (o
+  `inventario_2`...) con la hoja ya limpia y **vacía** la tabla sucia que tuviera con esos productos, para que el
+  almacén lea la nueva. Es la única excepción a "la base empieza vacía": la pide el jugador al saltar.
+- Después sigue igual que al completar la misión: descargan las cajas y cae la primera noche.
+
+## Explorador de archivos (barra lateral como VS Code)
+
+**Pedido:** "los archivos se están mostrando en el navbar, quiero un sidebar así como en Visual Studio Code... que al
+darle clic abra la ventana... que se pueda minimizar".
+- Barra lateral a la izquierda, debajo del letrero: una franja con el ícono de archivos (siempre visible) y el panel
+  **Explorador** con el árbol `La Esquina / robots (toño.py, lupe.py) / entregas (entrega_distribuidor.xlsx) /
+  inventario.py / shared.py`. Las carpetas se pliegan.
+- Clic en un archivo **abre** su ventana (o la trae al frente); no la cierra. El archivo de la ventana del frente se
+  resalta y los abiertos se ven más claros.
+- Se minimiza con «, con el ícono o con **Ctrl+B** (como VS Code). Se recuerda en `cdb.explorer.v1`.
+- En el letrero quedaron solo las herramientas: Tiquetes, Desbloqueos, Base de datos y Comandos.
+- Las ventanas no pueden quedar debajo del explorador (`leftInset()` en `windows.ts`); al abrirlo se corren.
+- Segunda versión ("hazlo mucho mejor, con mejor estilo"): colores de pizarra del juego con acento amarillo del
+  letrero (no el gris de VS Code), íconos SVG propios (Python, hoja, carpetas), sección **Abiertos** con ×, guías de
+  sangría, **estado en vivo** de cada robot e inventario.py (corriendo / pausado / error) y un contador rojo de errores
+  en el ícono cuando está minimizado. Se minimiza con animación del ancho.
+
+## Servidores, hardware y ciberseguridad
+
+**Pedido:** que los robots funcionen con servidores locales de un cuarto de la tienda (empieza con uno), que la
+capacidad del servidor defina el rendimiento de los robots, terminales Linux para conectarse por IP, una tienda en
+línea para comprar componentes y **montarlos a mano en primera persona** (sin bots, nada complejo), y eventos de
+ataques (DDoS...) con antivirus, logs, rastreo de la IP (nmap...) y denuncia a una "policía cibernética" con bug
+bounty si la IP es la real. El rastreo **no debe ser siempre igual**: varios casos y técnicas.
+- Diseño completo y fases en **`docs/servidores.md`**. Respuestas del usuario: el primer servidor se monta justo
+  después de la misión del inventario (por eso la primera noche dura 20 min); los ataques por ahora solo frenan; en
+  online el otro jugador sigue en la tienda; la base de datos no vive en ningún servidor.
+- Fase 1 hecha: `srv-01` con 1 núcleo; un bucle sin `wait()` satura la CPU y frena a los dos robots. Las mejoras
+  "CPU 2/3/4" ahora aceleran los núcleos de `srv-01`.
+- "Termina todas las fases de una vez": hechas las 8. Decisiones tomadas al implementar:
+  - El cuarto de servidores es un **anexo al oeste** de la tienda (fuera de la cuadrícula: los robots no caminan
+    ahí). 3 puestos de rack. Clic en uno libre = montaje; clic en un servidor = su terminal.
+  - Terminal **propia** (no xterm.js): ↑/↓, Tab, Ctrl+C, Ctrl+L; tuberías, `&&`, comillas y `sudo`.
+  - Las herramientas de investigación **se instalan con apt** (nmap, whois, dnsutils, binutils...), para enseñar apt.
+    `ufw`, `ss`, `curl`, `nc` y `ip` vienen de base.
+  - Los cables del montaje vienen gratis; las piezas se compran en TecnoMercado y llegan al amanecer.
+  - Las capas del rastreo son **proxies abiertos** con un panel en el puerto 8080 que dice "Último cliente
+    conectado": se siguen con `whois` + `curl`. Las VPN no se pueden atravesar (hay que buscar el descuido).
+  - El foro y la página de denuncias son sitios **ficticios** del navegador del juego; el foro también se puede leer
+    con `curl http://foro.undernet.test/u/<apodo>`.
+  - La misión del servidor tiene "Saltar" (monta `srv-01` listo y conecta a los robots).
+
+## Sala de servidores con diseño profesional
+
+**Pedido:** "mejora el diseño de la sala de servidores, sé más creativo y profesional... está demasiado básico y se ve feo".
+- Ahora vive en `apps/web/src/serverroom.ts` (clase `ServerRoom`), en el estilo low-poly de la tienda, como un
+  centro de datos pequeño: piso técnico con baldosas perforadas, franja de seguridad, pasillo frío con luz azul,
+  bandeja de cables amarilla, gabinetes de 42U con puerta de malla, paneles ciegos y ventiladores en el techo, switch
+  y patch panel con luces que titilan con el tráfico, UPS, extintor, consola con monitor (texto de terminal en vivo)
+  y silla, letrero "SALA DE SERVIDORES" y una pantalla de monitoreo en la pared (temperatura y CPU de cada servidor).
+- Todo reacciona al juego: franja de estado de cada rack (azul libre, ámbar montando o sin configurar, verde listo,
+  naranja caliente, rojo parpadeante si lo atacan), luces del servidor según la carga, silueta que late en los puestos
+  libres, carrito con el chasis abierto mientras se monta, aire acondicionado de precisión si lo compraron (si no, un
+  ventilador de pie), y luz propia de la sala que de noche se nota más.
+- Rendimiento: lo fijo se funde con `mergeStatic` (un material por color); las texturas se dibujan en canvas, sin
+  archivos nuevos.
+
+## Un solo rack al inicio (los demás se compran)
+
+**Pedido:** "solamente debe de haber 1 solo rack ya que los racks también hay que comprarlos... se irán comprando
+los otros junto con sus componentes". También: "el cable de 8 pines no aparece dónde colocarlo".
+- `World.racksOwned` empieza en 1. "Gabinete de rack 42U" ($15.000) está en TecnoMercado; llega al amanecer y suma
+  un puesto (máximo 3). Montar en un puesto sin rack da error; en la sala, esos puestos son una marca punteada en el
+  piso y al hacer clic se abre la tienda.
+- Montaje: el conector de 8 pines estaba detrás del disipador (no se veía). Ahora está arriba a la izquierda de la
+  CPU; la placa dibuja sus conectores (24 y 8 pines), el SSD su conector SATA y el chasis su puerto de red. Las zonas
+  donde se suelta brillan por encima de todo (`depthTest: false`).
+
+## Proveedor en el Navegador y productos premium
+
+**Pedido:** "agrega al navegador la página del proveedor para pedir nuevos productos... productos más costosos pero
+que se venderán mucho mejor... cuando llegue el repartidor que nos pase el Excel y nosotros lo migramos; el Excel
+siempre tendrá la misma estructura".
+- Pestaña **El Surtidor** (`elsurtidor.test`) en el Navegador: se llama como el camión de la intro ("Distribuidora
+  El Surtidor"), para que sea el mismo distribuidor. Se pide por cajas de 10; se paga al pedir; el repartidor llega
+  en 1 minuto de juego (`SUPPLIER` en `config.ts`).
+- El repartidor deja `pedido_N.xlsx` (carpeta **entregas** del explorador, marcado "nuevo" hasta migrarlo). Tiene
+  **las mismas columnas** que `entrega_distribuidor.xlsx`, con la fila TOTAL y los mismos descuidos (nombres
+  desordenados, a veces una fila repetida). La mercancía **no entra sola**: el almacén es la tabla de inventario del
+  jugador, así que solo aparece cuando la migra con pandas + `cursor.execute` (`World.warehouseFromDb = true` en la
+  web; en la simulación sola entra directo).
+- Como el número de filas cambia entre pedidos, la hoja tiene el atributo `hoja.last_cell` ("G6") para escribir
+  `hoja.select("A1", hoja.last_cell)` y reusar el script. Es un atributo, no un comando nuevo: pandas sigue teniendo
+  solo `read_excel` y `select`.
+- Premium: chocolate, queso, miel, aceite y vino. Más caros, con más ganancia por caja, **más demanda** (los clientes
+  los piden 1,6–2,2 veces más que el pan) y cada uno en los estantes trae 12% más clientes. Los clientes solo piden lo
+  premium que tiene estante (si no, habría faltantes sin culpa del jugador). El proveedor del barrio de `pick()` solo
+  trae lo básico.
+- Modelos 3D CC0 del mismo Food Kit de Kenney (cheese, chocolate, honey, bottle-oil, wine-red). Las estanterías
+  premium van contra la pared oeste del almacén y aparecen con la primera mercancía.
+
+## Ventana Comandos rediseñada
+
+- El usuario dijo que se veía "horrible, letra muy pequeña e inentendible" y pidió separar los comandos por categorías.
+- Ahora tiene un riel de categorías (El robot, Python, Datos, Servidores), buscador y una ficha por comando con la firma en `--fs-data` y la explicación en `--fs-ui`; el costo en ticks sale en una etiqueta. Cada grupo tiene su color.
+- El id de la ventana pasó de `help` a `commands` para que no herede el tamaño angosto guardado (460 px).
+
+## Toda la sintaxis desbloqueada; árbol de Mejoras para la tienda
+
+- El usuario pidió que **todos los comandos y la sintaxis vengan desbloqueados** y que en su lugar haya una tienda en forma de **árbol** donde se compre: ampliar el supermercado y el centro de datos, marketing para que lleguen más clientes y más estanterías que **el mismo jugador coloca donde quiera**.
+- `START_FEATURES` = todas. La ventana "Desbloqueos" ahora es "Mejoras" (`apps/web/src/upgrades.ts`), con tres ramas: La tienda, Marketing y Centro de datos (`UNLOCKS` en `config.ts`, con `branch` y `requires` como lista).
+- Ampliar el local **no cambia las coordenadas**: el mapa ya trae el tamaño final y las columnas sin comprar son lotes (`1`, `2` en `KIOSCO_MAP`) que `tileAt` devuelve como `null`. Así los scripts de los jugadores siguen sirviendo.
+- Los estantes comprados quedan en `world.shelvesToPlace` hasta que el jugador los pone (`world.placeShelf`). La sala de servidores empieza con espacio para 1 rack (`rackCapacity`); TecnoMercado no deja comprar más gabinetes de los que caben.
+
+## Más cajas, cajas activas/inactivas, cliente de prueba y más robots
+
+- El usuario pidió: (1) comprar otra caja y **elegir dónde ponerla**, que venga con su robot y el jugador le escriba el código; (2) cajas con estado **activo/inactivo** (inactiva = sin clientes); (3) de noche, **siempre un NPC de prueba** con productos en cada caja para probar el cajero, **sin descontar plata ni productos ni nada**; (4) comprar **más robots reponedores** como Toño.
+- Rama nueva "Equipo" en Mejoras (`caja2`, `caja3`, `robot1`, `robot2`). Los nombres y colores están en `EXTRA_ROBOTS` (`config.ts`).
+- Cada caja (`world.registers`) tiene su fila; `world.queue` es un getter con todas las filas. `REGISTER` sigue siendo la caja 1. El cajero solo atiende la fila de la caja donde está parado.
+- Activar o desactivar: clic en la caja en 3D (no desde el código, por ahora).
+- Clientes de prueba: `Customer.test`, ids negativos; `finishCheckout` solo emite un tiquete con `test: true` y un globo.
+
+## Sin ticks: la velocidad sale del tamaño del código; sin CPU en Mejoras; mantenimiento de racks
+
+- El usuario pidió **eliminar la mecánica de los ticks** y en su lugar: "entre menos código tenga un bot más rápido trabajará", cuidando las trampas con `shared.py` ("debes detectar la cantidad de líneas de las funciones importadas").
+- `codesize.ts` cuenta **instrucciones** del AST (no líneas de texto) del robot + las funciones de shared que usa (transitivo) + el nivel superior de shared. Usar el módulo sin `.` (alias, pasarlo) cuenta todo shared. Factor: `1 + (n − 20) × 0,025`, entre 0,5 y 2,5. Se fija en `runRobot`. Los robots rápidos dan hasta 2–3 pasos de VM por tick.
+- En la interfaz ya no aparecen ticks (Comandos, ayuda, `lscpu`). Internamente la simulación sigue avanzando en pasos de 1/10 s.
+- Las mejoras **CPU 2/3/4** se quitaron del árbol (el usuario: "deja solamente el mejorar las salas"). La CPU se mejora con piezas de TecnoMercado.
+- Clic en un rack con servidor: **elegir terminal o rack**. El rack abierto deja cambiar piezas (`World.openCase`, `removePart`, `disconnectCable`; `powerOn` re-enciende el mismo servidor sin perder Linux).
+- Montaje rediseñado con la skill `threejs-materials-lighting`: IBL con RoomEnvironment, sombras, ACES, texturas en canvas, piezas detalladas y bandeja con tarjetas e íconos SVG.
+- El panel de la noche (cuenta regresiva y votos) se movió a la barra superior; el resumen del día sale como aviso.
+
+## Partidas en línea con Supabase (todo en tiempo real)
+
+- El usuario eligió **Supabase** para guardar las partidas. Como el juego es privado, **todas las partidas son públicas**: cualquiera las ve en la lista y entra. Tabla `public.partidas` (`supabase/schema.sql`, se corre una vez en el SQL Editor) con RLS abierta para `anon`.
+- **Nunca** se pone la clave secreta en el código (el sitio es estático: se vería). Solo va la publicable (`apps/web/src/online/supabase.ts`, o `VITE_SUPABASE_URL`/`VITE_SUPABASE_KEY`).
+- "Todo debe ser en tiempo real, como Live Share": el **código** se comparte con Yjs por Supabase Realtime (broadcast), con el cursor y el nombre del otro. La **tienda**: el navegador del anfitrión (el que lleva más tiempo en la sala) corre la simulación, PostgreSQL, las terminales e `inventario.py`; el otro tiene un **mundo espejo** que recibe vistas (~7/s, solo lo que cambió). Sus acciones se aplican al tiro en el espejo y se piden al anfitrión (`online/gamesync.ts`).
+- También en tiempo real: las ventanas de la historia ("Continuar", "Saltar intro", los botones de las misiones: si uno avanza, avanzan los dos), la **terminal** (compartida), los **votos** de la noche, el **montaje del rack** (si uno lo abre, al otro también; lo que monta cualquiera aparece en vivo; se ve qué tiene el otro en la mano; el encendido lo ven los dos) y los nombres de los robots.
+- **Nombres de los robots**: al crear la partida los dos les ponen nombre a Toño y Lupe (lo que escribe uno le aparece al otro); al comprar un robot o una caja, también. `World.renameRobot`.
+- El anfitrión guarda cada 45 s y al cambiar de día: el mundo (`encodeWorld`, con el disco de los servidores), el código (estado de Yjs) y la base del jugador con **pg_dump** de pglite-tools (unos KB; el volcado binario pesaba 4,5 MB).
+- Si el anfitrión se va, el otro recarga y sigue desde el último guardado. `#partida=ABCD` en la dirección entra directo.
+- Bug arreglado: el almacén salía lleno (40/30/36) antes de registrar la mercancía; ahora empieza vacío y se llena desde la tabla de inventario del jugador.

@@ -30,7 +30,7 @@ export interface TableInfo {
 
 const MAX_ROWS = 500;
 
-/** Resultado de una consulta hecha desde Python (db.fetch, df.to_sql...). */
+/** Resultado de una consulta hecha desde Python (cursor.execute, cursor.fetch...). */
 export interface PlayerResult {
   rows: Record<string, unknown>[];
   fields: string[];
@@ -91,6 +91,11 @@ export class GameDB {
   private productIds = new Map<string, number>();
   private readyPromise: Promise<void> | null = null;
   private flushing: Promise<void> = Promise.resolve();
+  /**
+   * pg_dump (al guardar la partida) abre su propia transacción de solo lectura en la única sesión de PGlite: mientras
+   * corre, nada más puede tocar la base (si no, sus sentencias caen dentro de esa transacción y fallan).
+   */
+  private exporting: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly world: World) {}
 
@@ -133,6 +138,7 @@ export class GameDB {
   }
 
   private async doFlush(): Promise<void> {
+    await this.exporting;
     const pg = this.pg;
     if (!pg) return;
     const batch = this.queue;
@@ -203,6 +209,7 @@ export class GameDB {
 
   private async whenReady(): Promise<void> {
     if (!this.pg) await this.readyPromise;
+    await this.exporting; // que no se cuele dentro del volcado de pg_dump
     await this.flushing; // que los datos recientes ya estén
   }
 
@@ -264,6 +271,56 @@ export class GameDB {
       const detail = (e as Error).message ?? String(e);
       return { ok: false, message: translateError(detail), detail, ms: Math.round(performance.now() - t0) };
     }
+  }
+
+  /**
+   * La base para guardar la partida: las tablas del jugador (esquema y datos) y los datos del registro interno,
+   * como SQL de pg_dump. Pesa unos pocos KB (un volcado binario de PGlite pesa megas).
+   */
+  exportState(): Promise<{ public: string; registro: string }> {
+    // la base queda tomada desde ya: lo que se pida después espera a que termine el volcado
+    const before = this.exporting;
+    // solo lo que ya estaba pendiente (lo que llegue después espera al volcado: esperarlo aquí sería un abrazo mortal)
+    const pending = this.flushing;
+    const run = (async () => {
+      if (!this.pg) await this.readyPromise;
+      await before;
+      await pending;
+      const { pgDump } = await import("@electric-sql/pglite-tools/pg_dump");
+      const dump = async (args: string[]) => (await (await pgDump({ pg: this.pg!, args })).text());
+      try {
+        const pub = await dump(["--schema=public", "--no-privileges"]);
+        const reg = await dump(["--schema=registro", "--data-only"]);
+        return { public: pub, registro: reg };
+      } finally {
+        // pg_dump deja ABIERTA su transacción de solo lectura en la única sesión de PGlite (y search_path vacío):
+        // se cierra (solo leía: no se pierde nada) y la sesión vuelve a como estaba
+        await this.pg!.exec("ROLLBACK; RESET ALL;");
+      }
+    })();
+    this.exporting = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Carga una base guardada con exportState (reemplaza las tablas del jugador y el registro interno). */
+  async importState(state: { public: string; registro: string }): Promise<void> {
+    await this.whenReady();
+    const pg = this.pg!;
+    // lo que pg_dump pone para su propia sesión (search_path vacío, etc.) y el esquema public, que ya existe
+    const clean = (sql: string) =>
+      sql
+        .split("\n")
+        .filter((l) => !/^(SET |SELECT pg_catalog\.set_config\('search_path'|CREATE SCHEMA public;|ALTER SCHEMA public OWNER|COMMENT ON SCHEMA public)/.test(l))
+        .join("\n");
+    await pg.exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT USAGE, CREATE ON SCHEMA public TO jugador;");
+    await pg.exec(clean(state.public));
+    const tables = await pg.query<{ t: string }>("SELECT tablename AS t FROM pg_tables WHERE schemaname = 'registro'");
+    if (tables.rows.length) await pg.exec(`TRUNCATE ${tables.rows.map((r) => `registro.${ident(r.t)}`).join(", ")} RESTART IDENTITY CASCADE`);
+    await pg.exec(`SET session_replication_role = replica; ${clean(state.registro)}; SET session_replication_role = DEFAULT;`);
+    await pg.exec("RESET search_path");
+    const ids = await pg.query<{ id: number; name: string }>("SELECT id, name FROM registro.products");
+    this.productIds.clear();
+    for (const r of ids.rows) this.productIds.set(r.name, Number(r.id));
   }
 
   /** Borra todas las tablas del jugador (para empezar el diseño de cero). */
@@ -380,7 +437,7 @@ export function translateError(msg: string): string {
   if (/permission denied/.test(msg)) return "No tienes permiso para hacer eso en la base de datos.";
   if ((m = msg.match(/relation "(.+?)" already exists/))) return `La tabla "${m[1]}" ya existe. Si quieres rehacerla: DROP TABLE ${m[1]};`;
   if ((m = msg.match(/column "(.+?)" of relation "(.+?)" does not exist/))) {
-    return `La tabla "${m[2]}" no tiene la columna "${m[1]}". Revisa que los nombres de las columnas coincidan (con pandas: df.rename(columns={...})).`;
+    return `La tabla "${m[2]}" no tiene la columna "${m[1]}". Revisa que los nombres de las columnas del INSERT coincidan con los de tu CREATE TABLE.`;
   }
   if ((m = msg.match(/null value in column "(.+?)"/))) return `Falta el valor de la columna "${m[1]}" (está marcada NOT NULL).`;
   if ((m = msg.match(/duplicate key value violates unique constraint "(.+?)"/))) return `Ese valor ya existe y la tabla no permite repetidos (${m[1]}).`;

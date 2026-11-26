@@ -3,7 +3,10 @@ import { indentWithTab } from "@codemirror/commands";
 import { pythonLanguage, python } from "@codemirror/lang-python";
 import { HighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { type Diagnostic, forceLinting, linter } from "@codemirror/lint";
-import { EditorState, Prec, RangeSet, StateEffect, StateField } from "@codemirror/state";
+import { Compartment, EditorState, Prec, RangeSet, StateEffect, StateField } from "@codemirror/state";
+import { yCollab } from "y-codemirror.next";
+import type { Awareness } from "y-protocols/awareness";
+import * as Y from "yjs";
 import { Decoration, type DecorationSet, EditorView, GutterMarker, gutter, keymap } from "@codemirror/view";
 import { check, type Feature } from "@cdb/interpreter";
 import { tags as t } from "@lezer/highlight";
@@ -144,6 +147,8 @@ export interface EditorOptions {
 export class CodeEditor {
   readonly view: EditorView;
   private lastMarks: Marks = { run: null, error: null, paused: null };
+  /** Edición compartida (Yjs): vacío en el modo local. */
+  private readonly collab = new Compartment();
 
   constructor(private readonly opts: EditorOptions) {
     this.view = new EditorView({
@@ -151,6 +156,7 @@ export class CodeEditor {
       state: EditorState.create({
         doc: opts.doc,
         extensions: [
+          this.collab.of([]),
           breakpointGutter,
           basicSetup,
           python(),
@@ -199,6 +205,18 @@ export class CodeEditor {
     if (line && line <= this.view.state.doc.lines) {
       this.view.dispatch({ effects: EditorView.scrollIntoView(this.view.state.doc.line(line).from, { y: "nearest" }) });
     }
+  }
+
+  /**
+   * Conecta el editor a un texto compartido (partida en línea): lo que escribe cada jugador aparece en vivo en el otro,
+   * con su cursor y su nombre.
+   */
+  attachCollab(text: Y.Text, awareness: Awareness): void {
+    const shared = text.toString();
+    if (this.view.state.doc.toString() !== shared) {
+      this.view.dispatch({ changes: { from: 0, to: this.view.state.doc.length, insert: shared } });
+    }
+    this.view.dispatch({ effects: this.collab.reconfigure(yCollab(text, awareness, { undoManager: new Y.UndoManager(text) })) });
   }
 
   /** Vuelve a revisar desbloqueos (después de una compra). */

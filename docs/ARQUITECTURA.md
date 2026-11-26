@@ -15,6 +15,7 @@ apps/web (navegador)
     ▼
 packages/sim ── World.step() (10 ticks/s): robots (VM), clientes, caja, eventos
     │  api.ts (comandos de los robots) · sqlapi.ts (db) · pandas.ts · delivery.ts · config.ts
+    │  servers.ts · hardware.ts · network.ts · security.ts · shell/ (terminal Linux simulada)
     ▼                                   ▲ SqlAdapter (world.sql)
 packages/interpreter ── VM de Python    │
 packages/db ── GameDB (PGlite) ─────────┘  esquema public (jugador) + registro (interno)
@@ -98,8 +99,8 @@ Errores de uso "blandos" (pick fuera del almacén) → aviso en consola + `Actio
 **Caja** (`finishCheckout`): compara lo pagado menos la devuelta con el total real →
 `ok` (+1 rep), `cobro_de_mas` (−5 rep, se devuelve la diferencia), `cobro_de_menos` (la tienda pierde), `sin_cobrar`.
 
-**Librerías** (`world.libraries()`): `db` (`sqlapi.ts`, estilo asyncpg: `execute/fetch/fetchrow/fetchval/executemany`
-con `$1`) y `pandas` (`pandas.ts`). Usan `world.sql` (un `SqlAdapter`), que la web conecta a `GameDB.playerQuery`.
+**Librerías** (`world.libraries()`): `cursor` (alias `db`; `sqlapi.ts`: `execute/fetch/fetchrow/fetchval/executemany`
+con `%s` o `$1`, valores en tupla o sueltos; `placeholders()` traduce `%s` → `$n`) y `pandas` (`pandas.ts`). `cursor` usa `world.sql` (un `SqlAdapter`), que la web conecta a `GameDB.playerQuery`.
 
 **Balance**: todos los números en `config.ts` (precios, ticks por acción, paciencia, desbloqueos y su costo, CPU).
 
@@ -185,17 +186,33 @@ cerrar, zoom (− % +) que reescala `--fs-*` y el tamaño de la ventana, `setBox
 1. `packages/sim/src/api.ts`: nueva entrada en el objeto que devuelve `makeApi` (`fn(name, impl)`; para acciones,
    `act(etiqueta, ticks, complete)`).
 2. Costos en `config.ts` (`TICKS`). 3. Test en `packages/sim/test/world.test.ts`.
-4. Ayuda y autocompletado: `apps/web/src/help.ts` (`COMMANDS`). 5. GDD (apéndice de la API).
+4. Ayuda y autocompletado: `apps/web/src/help.ts` (`COMMANDS`); la ventana Comandos (`apps/web/src/commands.ts`) los toma de ahí por su `group`. Las secciones que no son comandos (terminal, seguridad, pandas...) están escritas en `commands.ts`. 5. GDD (apéndice de la API).
 
 **Agregar un producto**: `PRODUCTS` y `WAREHOUSE_START` (`config.ts`) (los estantes son libres: no hay letra por producto); modelo en
 `PRODUCT_MODEL` y emoji en `PRODUCT_EMOJI` (`store3d.ts`); artículo en `ARTICLES` (`main.ts`); fila en `DELIVERY`
 si llega en el camión. Revisa los tests de posiciones del mapa.
 
-**Agregar un desbloqueo**: `UNLOCKS` en `config.ts` (con `feature` o `cpuLevel`). Si es sintaxis nueva, agrégala a
-`FEATURES` y a `checkFeatures()`.
+**Agregar una mejora** (árbol de la ventana Mejoras): entrada en `UNLOCKS` (`config.ts`) con `branch`, `requires`
+(lista) y su efecto (`shelves`, `lot`, `marketing`, `patience`, `racks`, `cpuLevel`); si el efecto es nuevo, aplícalo en
+`World.buy()`. El ícono va en `ICONS` (`apps/web/src/upgrades.ts`); el árbol se arma solo según `requires`.
+Toda la sintaxis viene desbloqueada (`START_FEATURES`); si agregas sintaxis nueva, súmala a `FEATURES` y `checkFeatures()`.
 
-**Agregar algo de pandas**: método en `makeDataFrame` / `makeSeries` (`pandas.ts`), test en
-`packages/sim/test/pandas.test.ts`, ayuda en `renderHelp()` de `main.ts`.
+**Cajas y robots nuevos**: `World.registers` (cada una con su `queue`), `placeRegister`/`registerProblem`,
+`setRegisterActive`. Los robots comprados salen de `EXTRA_ROBOTS` (`config.ts`) con `hireRobot`, que emite el evento
+`hired`; `onHired()` en `main.ts` crea su ventana de código (`hiredScript`) y su archivo en el explorador. En 3D,
+`Store3D` crea solo los robots y cajas que aparecen (`updateRobots`, `updateRegisters`). El modo colocar sirve para
+estantes y cajas (`startPlacement(kind)`).
+
+**Velocidad de los robots**: `measureCode()` (`packages/sim/src/codesize.ts`) se llama en `World.runRobot` y queda en
+`robot.code`. `World.stepServer` le da a cada robot `1 / slowdown(robot)` pasos por tick (hasta 3). Tests en
+`packages/sim/test/codesize.test.ts`. Si agregas una instrucción nueva al AST, cuéntala en `countStmts`/`walkStmts`.
+
+**Ampliar el terreno**: los lotes son dígitos en `KIOSCO_MAP` (`1`, `2`...): esas casillas existen desde el inicio
+(las coordenadas no cambian) pero `tileAt()` las devuelve como `null` hasta `world.openLot(n)`. En 3D se ven como
+obra (`Store3D.buildLots`) y se quitan solas al abrirse.
+
+**pandas** (`pandas.ts`) tiene a propósito solo `read_excel` y `hoja.select(rango)` (ver DECISIONES); tests en
+`packages/sim/test/pandas.test.ts`, ayuda en `apps/web/src/commands.ts`.
 
 **Agregar una ventana**: `new FloatingWindow(layer, { id, title, x, y, width, height, className? })`, contenido en
 `win.body`, entrada en `DOCK` (`main.ts`). Usa solo las variables `--fs-*` para el texto.
@@ -216,6 +233,6 @@ si llega en el camión. Revisa los tests de posiciones del mapa.
 | `interpreter/test/debugger.test.ts` | f-strings y depurador |
 | `interpreter/test/native.test.ts` | `import as`, módulos nativos, `HostProtocol`, acciones asíncronas |
 | `sim/test/world.test.ts` | Mapa, robots, caja, tienda completa 10 min, desbloqueos, sonidos, depurador |
-| `sim/test/pandas.test.ts` | pandas sencillo |
+| `sim/test/pandas.test.ts` | pandas del juego (read_excel + select) y `%s` → `$1` |
 | `db/test/gamedb.test.ts` | Registro interno vs. tiquetes, permisos, errores, parámetros, inventario |
-| `db/test/inventory.test.ts` | Misión completa: pandas → CREATE TABLE → to_sql → SQL desde la cajera |
+| `db/test/inventory.test.ts` | Misión completa: select → Python → cursor.execute (INSERT) → SQL desde la cajera |

@@ -1,5 +1,5 @@
 import { VM } from "@cdb/interpreter";
-import { DELIVERY_PRODUCTS, TICKS_PER_SECOND, World } from "@cdb/sim";
+import { DELIVERY_PRODUCTS, PRODUCT_NAMES, TICKS_PER_SECOND, World } from "@cdb/sim";
 import { beforeEach, describe, expect, test } from "vitest";
 import { GameDB } from "../src/index.js";
 
@@ -26,28 +26,27 @@ beforeEach(async () => {
 
 const SOLUCION = `
 import pandas as pd
-df = pd.read_excel("entrega_distribuidor.xlsx")
-df = df.rename(columns={"Código": "codigo", "Producto": "nombre", "Categoría": "categoria",
-                        "Cantidad": "cantidad", "Precio Unitario": "precio", "Costo Unitario": "costo", "Vence": "vence"})
-df["nombre"] = df["nombre"].str.strip().str.lower()
-df = df[df["nombre"] != "total"].drop_duplicates()
-db.execute("""CREATE TABLE productos (
-    codigo TEXT PRIMARY KEY, nombre TEXT NOT NULL UNIQUE, categoria TEXT,
-    cantidad INT NOT NULL, precio BIGINT NOT NULL, costo BIGINT NOT NULL, vence DATE)""")
-n = df.to_sql("productos", db)
-print(f"subí {n} productos")
-print(db.fetchval("SELECT precio FROM productos WHERE nombre = $1", "leche"))
-fila = db.fetchrow("SELECT nombre, cantidad FROM productos ORDER BY cantidad DESC LIMIT 1")
+hoja = pd.read_excel("entrega_distribuidor.xlsx")
+cursor.execute("CREATE TABLE productos (codigo TEXT PRIMARY KEY, nombre TEXT NOT NULL UNIQUE, categoria TEXT, cantidad INT NOT NULL, precio BIGINT NOT NULL, costo BIGINT NOT NULL, vence DATE)")
+vistos = []
+for fila in hoja.select("A1", "G6"):
+    nombre = fila["Producto"].strip().lower()
+    if nombre == "total" or nombre in vistos:
+        continue
+    vistos.append(nombre)
+    cursor.execute("INSERT INTO productos VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                   (fila["Código"], nombre, fila["Categoría"], fila["Cantidad"], fila["Precio Unitario"], fila["Costo Unitario"], fila["Vence"]))
+print(f"subí {len(vistos)} productos")
+print(cursor.fetchval("SELECT precio FROM productos WHERE nombre = %s", "leche"))
+fila = cursor.fetchrow("SELECT nombre, cantidad FROM productos ORDER BY cantidad DESC LIMIT 1")
 print(fila["nombre"], fila["cantidad"])
-print(len(db.fetch("SELECT * FROM productos")))
-print(db.execute("UPDATE productos SET cantidad = cantidad - 1 WHERE nombre = $1", "pan"))
+print(len(cursor.fetch("SELECT * FROM productos")))
+print(cursor.execute("UPDATE productos SET cantidad = cantidad - 1 WHERE nombre = $1", "pan"))
 `;
 
 describe("misión: organiza tu inventario", () => {
-  test("la solución completa: pandas -> CREATE TABLE -> to_sql -> consultas con $1", async () => {
-    // el lexer no tiene triples comillas: se usa un texto de una línea
-    const src = SOLUCION.replace(/"""([\s\S]*?)"""/, (_, sql: string) => JSON.stringify(sql.replace(/\s+/g, " ")));
-    const r = await script(world, src);
+  test("la solución completa: select -> Python -> cursor.execute con %s y $1", async () => {
+    const r = await script(world, SOLUCION);
     expect(r.error).toBeNull();
     expect(r.out).toEqual(["subí 3 productos", "4500", "pan 40", "3", "UPDATE 1"]);
     const st = await db.inventoryStatus(DELIVERY_PRODUCTS);
@@ -55,8 +54,7 @@ describe("misión: organiza tu inventario", () => {
   });
 
   test("el almacén es la tabla del jugador: se lee la cantidad y se descuenta al sacar", async () => {
-    const src0 = SOLUCION.replace(/"""([\s\S]*?)"""/, (_, sql: string) => JSON.stringify(sql.replace(/\s+/g, " ")));
-    expect((await script(world, src0)).error).toBeNull();
+    expect((await script(world, SOLUCION)).error).toBeNull();
     const src = await db.warehouseSource(DELIVERY_PRODUCTS);
     // la solución ya restó 1 pan con un UPDATE
     expect(src).toMatchObject({ table: "productos", nameCol: "nombre", qtyCol: "cantidad", stock: { pan: 39, leche: 30, huevos: 36 } });
@@ -71,23 +69,20 @@ describe("misión: organiza tu inventario", () => {
   });
 
   test("subir la hoja sin limpiar: repetidos y la fila TOTAL quedan marcados", async () => {
-    await db.run('CREATE TABLE inv ("Código" TEXT, "Producto" TEXT, "Categoría" TEXT, "Cantidad" INT, "Precio Unitario" INT, "Costo Unitario" INT, "Vence" TEXT)');
-    const r = await script(world, 'import pandas as pd\npd.read_excel("entrega_distribuidor.xlsx").to_sql("inv", db)');
+    await db.run("CREATE TABLE inv (producto TEXT, cantidad INT)");
+    const r = await script(world, `
+import pandas as pd
+for fila in pd.read_excel("entrega_distribuidor.xlsx").select("B1:D6"):
+    cursor.execute("INSERT INTO inv VALUES (%s, %s)", (fila["Producto"], fila["Cantidad"]))
+`);
     expect(r.error).toBeNull();
     const st = await db.inventoryStatus(DELIVERY_PRODUCTS);
     expect(st.best).toMatchObject({ counts: { pan: 1, leche: 2, huevos: 1 }, hasTotalRow: true });
   });
 
-  test("to_sql no crea tablas: hay que diseñarlas primero", async () => {
-    const r = await script(world, 'import pandas as pd\ndf = pd.read_excel("entrega_distribuidor.xlsx")\ndf.to_sql("productos", db)');
+  test("insertar en una tabla que no existe: error claro", async () => {
+    const r = await script(world, 'cursor.execute("INSERT INTO productos VALUES (%s)", ("pan",))');
     expect(r.error).toContain('La tabla "productos" no existe');
-    expect(r.error).toContain("to_sql no crea tablas");
-  });
-
-  test("columnas que no coinciden con la tabla: error claro", async () => {
-    await db.run("CREATE TABLE productos (nombre TEXT, cantidad INT)");
-    const r = await script(world, 'import pandas as pd\ndf = pd.read_excel("entrega_distribuidor.xlsx")\ndf[["Producto", "Cantidad"]].to_sql("productos", db)');
-    expect(r.error).toContain('no tiene la columna "Producto"');
   });
 
   test("la cajera guarda cada venta con SQL desde su código", async () => {
@@ -124,5 +119,44 @@ while True:
     expect(r.error).toBe('Línea 2: SQL: La tabla "nada" no existe. Mira la lista de tablas a la izquierda.');
     const r2 = await script(world, 'db.execute("DELETE FROM sales")');
     expect(r2.error).toContain('La tabla "sales" no existe');
+  });
+});
+
+describe("pedidos de El Surtidor: el mismo script migra cada Excel", () => {
+  const MIGRAR = (archivo: string) => `
+import pandas as pd
+hoja = pd.read_excel("${archivo}")
+vistos = []
+for fila in hoja.select("A1", hoja.last_cell):
+    nombre = fila["Producto"].strip().lower()
+    if nombre == "total" or nombre in vistos:
+        continue
+    vistos.append(nombre)
+    ya = cursor.fetchval("SELECT cantidad FROM productos WHERE nombre = %s", (nombre,))
+    if ya is None:
+        cursor.execute("INSERT INTO productos VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                       (fila["Código"], nombre, fila["Categoría"], fila["Cantidad"], fila["Precio Unitario"], fila["Costo Unitario"], fila["Vence"]))
+    else:
+        cursor.execute("UPDATE productos SET cantidad = cantidad + %s WHERE nombre = %s", (fila["Cantidad"], nombre))
+print(vistos)
+`;
+
+  test("primera entrega + un pedido con productos nuevos y repetidos: el almacén los ve", async () => {
+    world.warehouseFromDb = true;
+    await script(world, `cursor.execute("CREATE TABLE productos (codigo TEXT PRIMARY KEY, nombre TEXT NOT NULL UNIQUE, categoria TEXT, cantidad INT NOT NULL, precio BIGINT NOT NULL, costo BIGINT NOT NULL, vence DATE)")`);
+    expect((await script(world, MIGRAR("entrega_distribuidor.xlsx"))).error).toBeNull();
+    world.money = 1_000_000;
+    expect(world.orderGoods([{ product: "vino", cases: 2 }, { product: "pan", cases: 1 }]).ok).toBe(true);
+    for (let i = 0; i < 60 * TICKS_PER_SECOND; i++) world.step();
+    expect(world.workbooks.at(-1)!.filename).toBe("pedido_1.xlsx");
+    // antes de migrar, el almacén no tiene vino
+    const before = await db.warehouseSource(PRODUCT_NAMES);
+    expect(before!.stock.vino).toBe(0);
+    const r = await script(world, MIGRAR("pedido_1.xlsx"));
+    expect(r.error).toBeNull();
+    const after = await db.warehouseSource(PRODUCT_NAMES);
+    expect(after!.stock.vino).toBe(20);
+    expect(after!.stock.pan).toBe(40 + 10);
+    expect(after!.stock.leche).toBe(30);
   });
 });

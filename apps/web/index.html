@@ -37,8 +37,8 @@
             <span class="mi-load" aria-hidden="true"><span></span></span>
           </button>
           <button class="menu-item" data-action="online" aria-disabled="true">
-            <span class="mi-label">Jugar en línea <em class="mi-tag">Pronto</em></span>
-            <span class="mi-sub">Salas con código de 4 letras para jugar con alguien desde otra casa.</span>
+            <span class="mi-label">Jugar en línea</span>
+            <span class="mi-sub">Partidas con código de 4 letras: los dos ven la tienda y el código en vivo.</span>
           </button>
           <button class="menu-item" data-action="how">
             <span class="mi-label">Cómo se juega</span>
@@ -71,6 +71,12 @@
         wait()</code></pre>
           <p class="mp-note">Un ejemplo de cómo podría verse el código de Lupe. La función <code>cobrar</code> la escriben ustedes.</p>
         </div>
+        <button class="mp-back">Volver</button>
+      </aside>
+
+      <aside class="menu-panel lobby" data-panel="online" aria-label="Jugar en línea" hidden>
+        <h2>Jugar en línea</h2>
+        <div class="mp-body"></div>
         <button class="mp-back">Volver</button>
       </aside>
 
@@ -130,6 +136,39 @@
       </div>
       <nav class="dock" id="dock" aria-label="Ventanas"></nav>
     </header>
+
+    <aside class="explorer" id="explorer" aria-label="Explorador de archivos">
+      <div class="ex-rail">
+        <button class="ex-toggle" title="Explorador (Ctrl+B)" aria-label="Mostrar u ocultar el explorador" aria-expanded="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M8 3.5h6.5L19 8v10.5a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14.5 3.5V8H19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4 7v12.5A1.5 1.5 0 0 0 5.5 21H15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <span class="ex-badge" hidden></span>
+        </button>
+      </div>
+      <div class="ex-panel">
+        <div class="ex-inner">
+          <div class="ex-head">
+            <span class="ex-title">Explorador</span>
+            <span class="ex-actions">
+              <button class="ex-fold-all" title="Plegar carpetas" aria-label="Plegar todas las carpetas">
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3.5h10M3 12.5h10M5.5 6 8 8.5 10.5 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="ex-collapse" title="Ocultar (Ctrl+B)" aria-label="Ocultar el explorador">
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M9.5 4 5.5 8l4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </span>
+          </div>
+          <section class="ex-section" data-section="abiertos">
+            <button class="ex-sec-head" aria-expanded="true"><span class="ex-chev" aria-hidden="true"></span>Abiertos<span class="ex-count"></span></button>
+            <div class="ex-open-list" role="list"></div>
+          </section>
+          <section class="ex-section ex-grow" data-section="esquina">
+            <button class="ex-sec-head" aria-expanded="true"><span class="ex-chev" aria-hidden="true"></span>La Esquina</button>
+            <div class="ex-tree" role="tree"></div>
+          </section>
+          <footer class="ex-foot"><kbd>Ctrl</kbd><kbd>B</kbd> ocultar</footer>
+        </div>
+      </div>
+    </aside>
 
     <ul id="alerts" class="alerts" aria-live="polite"></ul>
     <div id="windows"></div>

@@ -1,5 +1,5 @@
 import { Action, HostObject, PyBuiltin, PyError, PyList, PyTuple, type Value } from "@cdb/interpreter";
-import { PRODUCTS, type ProductName, ROBOT, TICKS, COST_RATIO } from "./config.js";
+import { PRODUCTS, PRODUCT_NAMES, type ProductName, ROBOT, TICKS, COST_RATIO } from "./config.js";
 import type { Customer, Robot, Shelf, World } from "./world.js";
 
 const DIRS: Record<string, [number, number]> = {
@@ -8,8 +8,6 @@ const DIRS: Record<string, [number, number]> = {
   East: [1, 0],
   West: [-1, 0],
 };
-
-const PRODUCT_NAMES = Object.keys(PRODUCTS) as ProductName[];
 
 function suggestProduct(name: string): string {
   const close = PRODUCT_NAMES.find((p) => p.startsWith(name.slice(0, 2)));
@@ -62,7 +60,9 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
   const customer = (fnName: string): Customer | null => {
     const c = world.customerAtRegister(robot);
     if (!c) {
-      if (robot.x !== world.register.x || robot.y !== world.register.y) warn(`${fnName}(): el robot no está en la caja`);
+      const reg = world.registerAt(robot.x, robot.y);
+      if (!reg) warn(`${fnName}(): el robot no está en una caja`);
+      else if (!reg.active) warn(`${fnName}(): la caja ${reg.id} está inactiva (actívala con clic en la caja)`);
       else warn(`${fnName}(): no hay ningún cliente en la caja`);
     }
     return c;
@@ -85,7 +85,8 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
       if (world.tileAt(to.x, to.y) === null || world.wallBetween(robot, to) || world.occupied(to.x, to.y, robot)) {
         return new Action(TICKS.failed, () => false);
       }
-      robot.moving = { from: { x: robot.x, y: robot.y }, to, startTick: world.tick, ticks: TICKS.move };
+      // con el servidor saturado el robot camina más lento (el render usa estos ticks para interpolar)
+      robot.moving = { from: { x: robot.x, y: robot.y }, to, startTick: world.tick, ticks: Math.round(TICKS.move * world.slowdown(robot)) };
       return act(`${ARROWS[dir as string]} ${dir}`, TICKS.move, () => {
         if (robot.moving) {
           robot.x = to.x;
@@ -110,10 +111,19 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
       // primero sale de lo que hay guardado; si se acabó, el proveedor del barrio trae más (y cobra)
       const fromStock = Math.min(room, world.warehouseStock[product]);
       const unitCost = PRODUCTS[product].price * COST_RATIO;
-      const bought = Math.min(room - fromStock, Math.floor(world.money / unitCost));
+      // el proveedor del barrio solo trae lo básico; lo premium hay que pedirlo a El Surtidor (Navegador)
+      const basic = PRODUCTS[product].basic;
+      const bought = basic ? Math.min(room - fromStock, Math.floor(world.money / unitCost)) : 0;
       const amount = fromStock + bought;
       if (amount === 0) {
-        return fail(robot.cargo.n >= ROBOT.capacity ? "pick(): el robot ya va lleno" : `pick(): no queda ${product} en el almacén y no alcanza el dinero para el proveedor`, 0);
+        return fail(
+          robot.cargo.n >= ROBOT.capacity
+            ? "pick(): el robot ya va lleno"
+            : basic
+              ? `pick(): no queda ${product} en el almacén y no alcanza el dinero para el proveedor`
+              : `pick(): no queda ${product} en el almacén. Pídelo a la Distribuidora El Surtidor (Navegador) y migra su Excel a tu inventario`,
+          0,
+        );
       }
       if (fromStock > 0) world.takeFromWarehouse(product, fromStock);
       if (bought > 0) {
@@ -162,15 +172,18 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
 
     // ── caja ──
     has_customer: fn("has_customer", () => world.customerAtRegister(robot) !== null),
-    queue_length: fn("queue_length", () => world.queue.length),
+    // en una caja: su fila; fuera de las cajas: todos los que esperan
+    queue_length: fn("queue_length", () => world.registerAt(robot.x, robot.y)?.queue.length ?? world.queue.length),
 
-    /** Escanea todo lo que queda en el carrito y devuelve la lista de productos. 2 ticks por producto. */
+    /** Escanea todo lo que queda en el carrito y devuelve la lista de productos. 2 ticks por producto (1 con GPU). */
     scan_item: fn("scan_item", () => {
       const c = customer("scan_item");
       if (!c) return new Action(TICKS.failed, () => new PyList([]));
       const rest = c.cart.slice(c.checkout.scanned);
-      if (rest.length) world.sound("scan", world.register);
-      return act(`🔎 escaneando ${rest.length}`, Math.max(1, TICKS.scanPerItem * rest.length), () => {
+      if (rest.length) world.sound("scan", robot);
+      // con GPU en su servidor, la visión por computador escanea el doble de rápido
+      const perItem = world.serverOf(robot)?.gpu ? TICKS.scanPerItem / 2 : TICKS.scanPerItem;
+      return act(`🔎 escaneando ${rest.length}`, Math.max(1, Math.ceil(perItem * rest.length)), () => {
         c.checkout.scanned = c.cart.length;
         return new PyList(rest);
       });
@@ -197,7 +210,7 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
       if (!c) return new Action(TICKS.failed, () => null);
       if (c.checkout.paid === null) return fail("give_change(): primero cobra con take_payment()", null);
       if (c.checkout.change !== null) return fail("give_change(): ya le diste la devuelta", null);
-      if (change > 0) world.sound("coins", world.register);
+      if (change > 0) world.sound("coins", robot);
       return act(`🪙 devuelta ${money(change)}`, TICKS.giveChange, () => {
         c.checkout.change = change;
         world.finishCheckout(c);

@@ -13,7 +13,7 @@ Lee también: `docs/ARQUITECTURA.md` (cómo funciona por dentro, recetas para ca
 ```bash
 pnpm install
 pnpm dev         # http://localhost:5173 (Vite). Si el puerto está ocupado, ya hay un servidor corriendo.
-pnpm test        # vitest: intérprete, simulación, base de datos (167 tests; los de db arrancan PGlite, ~10 s)
+pnpm test        # vitest: intérprete, simulación, base de datos (212 tests; los de db arrancan PGlite, ~10 s)
 pnpm typecheck   # tsc en los 4 paquetes
 pnpm build       # build de producción (apps/web/dist). Los avisos "node:module externalized" de PGlite son normales.
 ```
@@ -30,9 +30,9 @@ Corre `pnpm typecheck && pnpm test` antes de dar algo por terminado. Para cambio
 | Carpeta | Qué es |
 |---|---|
 | `packages/interpreter` | Intérprete propio de un **subconjunto de Python** en TypeScript: ejecución por ticks (generadores), desbloqueos de sintaxis, depurador, f-strings, errores en español. Sin dependencias. |
-| `packages/sim` | La **simulación** de la tienda (sin navegador): `World`, comandos de los robots (`api.ts`), clientes, caja, balance (`config.ts`), conexión `db` estilo asyncpg (`sqlapi.ts`), **pandas sencillo** (`pandas.ts`), hoja del distribuidor (`delivery.ts`). |
+| `packages/sim` | La **simulación** de la tienda (sin navegador): `World`, comandos de los robots (`api.ts`), clientes, caja, balance (`config.ts`), **servidores** (`servers.ts`, `hardware.ts`, `security.ts`, `network.ts`, terminal en `shell/`), conexión `cursor` (alias `db`, `sqlapi.ts`), **pandas mínimo** (`pandas.ts`: read_excel + select), hoja del distribuidor (`delivery.ts`). |
 | `packages/db` | **PostgreSQL real** con PGlite: tablas del jugador (esquema `public`) + registro interno invisible (esquema `registro`), rol `jugador`, traducción de errores. |
-| `apps/web` | Vite + **Three.js** (tienda 3D con modelos CC0 de Kenney) + **CodeMirror 6** en **ventanas flotantes**, audio procedural, intro, misión. |
+| `apps/web` | Vite + **Three.js** (tienda 3D con modelos CC0 de Kenney) + **CodeMirror 6** en **ventanas flotantes**, audio procedural, intro, misiones, terminal (`terminal.ts`), navegador (`browser.ts`), montaje (`assembly.ts`). |
 | `docs/gdd` | Documento de diseño (GDD). Fuente: `gdd_content.py`; se regenera con `build_gdd.py` (ver abajo). |
 | `.claude/skills` | Skills instaladas por el usuario (vitest, three.js, PostgreSQL, audio, diseño de juegos...). `phaser-*` quedaron de una versión anterior: el juego ya **no** usa Phaser. |
 
@@ -60,7 +60,8 @@ Corre `pnpm typecheck && pnpm test` antes de dar algo por terminado. Para cambio
 - **CodeMirror**: los atajos propios (Ctrl+Enter) necesitan `Prec.highest(...)` o los pisa el keymap por defecto.
   Tab indenta gracias a `indentWithTab` + `indentUnit` de 4 espacios.
 - **Ventanas flotantes** (`windows.ts`): la altura "normal" vive en `dataset.h`; no la recalcules desde `offsetHeight`
-  mientras la ventana está minimizada (ya hubo un bug así). Nunca dejes ventanas debajo del letrero: usa `topInset()`.
+  mientras la ventana está minimizada (ya hubo un bug así). Nunca dejes ventanas debajo del letrero ni del explorador
+  de archivos (barra lateral izquierda): usa `topInset()` y `leftInset()`.
 - **CSS2DRenderer**: elementos que el usuario debe ver no deben depender solo de transiciones CSS (en el Chrome
   headless de pruebas a veces se congelan). En las modales se usa `visibility`, no `opacity` con transición.
 - **PGlite** en Vite necesita `optimizeDeps.exclude: ["@electric-sql/pglite"]` (ya está en `vite.config.ts`).
@@ -87,6 +88,9 @@ await page.goto("http://localhost:5173", { waitUntil: "domcontentloaded" }); // 
   pruebas: esperar `.menu.scene-ready` y hacer clic en `[data-action="play"]`. Las animaciones CSS casi no avanzan en el
   Chrome por software: usa `page.screenshot({ animations: "disabled" })` y `setDefaultTimeout(120000)`.
 - Saltar la intro: `localStorage.setItem("cdb.progress.v1", JSON.stringify({ storeOpen: true }))` y recargar.
+  La partida empieza **sin servidores** (`world.startServerTutorial()`): sin servidor los robots no corren. Para
+  saltarse el montaje: `world.skipServerTutorial()` (o el botón Saltar de la misión "Monta tu servidor").
+  Para probar el montaje: `window.assembly.screenPos("placa")` da dónde soltar cada pieza.
   La primera noche sale solo si no está `prepDone: true`; para abrir ya, `world.openStore()` o los dos "¡Listo!".
   Para saltar al cierre: `for (let i=0;i<3000;i++) world.step()` (un día = 3000 ticks).
 - Playwright: usa `playwright-core` ≥ 1.55 (las versiones viejas lanzan `--headless=old`, que el Chrome actual ya no tiene).
@@ -103,11 +107,14 @@ await page.goto("http://localhost:5173", { waitUntil: "domcontentloaded" }); // 
 | `cdb.windows.v1` | Posición, tamaño, zoom y estado de cada ventana |
 | `cdb.queries.v1` | Consultas SQL guardadas por el jugador |
 | `cdb.audio.v1` | Volumen de música/efectos y silencio |
+| `cdb.commands.v1` | Última categoría abierta en la ventana Comandos |
+| `cdb.explorer.v1` | Explorador de archivos: `{ collapsed, closedFolders, closedSections }` (se conserva al recargar) |
+| `cdb.player.v1` | En línea: `{ id, name, color }` de este jugador |
 | `cdb.progress.v1` | `{ storeOpen, prepDone }`: si ya terminó la intro/misión y la primera noche |
 
 **Cada recarga empieza la partida desde 0** (lo pidió el usuario): al cargar `main.ts` borra `cdb.scripts.v1`,
 `cdb.progress.v1` y `cdb.queries.v1`, y la base PostgreSQL corre **en memoria** (antes estaba en IndexedDB). Solo se
-conservan el audio y las ventanas. Para probar sin intro hay que poner `cdb.progress.v1` *después* de cargar y llamar
+conservan el audio, las ventanas y el explorador. Para probar sin intro hay que poner `cdb.progress.v1` *después* de cargar y llamar
 a `world.openStore()` (recargar lo borra).
 
 ## Estado y próximos pasos
@@ -118,10 +125,34 @@ misión de inventario con pandas, almacén como cuarto aparte (estantes libres: 
 noche es la preparación; votos de los 2 jugadores para abrir antes (en local, un botón por jugador); cada día llegan
 más clientes; luces y música cambian según la hora.
 
+**Servidores, hardware y ciberseguridad** (las 8 fases hechas; detalle y mapa del código en `docs/servidores.md`):
+cuarto de servidores, montaje en 1ª persona, terminal Linux simulada, red/IPs, TecnoMercado, ataques (solo frenan),
+10 técnicas de rastreo, denuncias con bug bounty, temperatura y GPU.
+
+**Proveedor y productos premium**: pestaña El Surtidor del Navegador (pedidos por cajas, `World.orderGoods`); el
+repartidor deja `pedido_N.xlsx` (misma estructura que la primera entrega) que el jugador migra con pandas +
+`cursor.execute`; `hoja.last_cell`. Para probar sin esperar: `for (let i=0;i<600;i++) world.step()`.
+
+**Árbol de Mejoras** (ventana Mejoras, `apps/web/src/upgrades.ts`): toda la sintaxis viene desbloqueada; se compran
+estantes (el jugador elige la casilla: `world.placeShelf`, modo colocar en `Store3D.startPlacement`), ampliar el local
+(lotes del terreno al este, sin cambiar coordenadas), marketing (más clientes y paciencia) y el centro de datos (CPU y
+espacio para racks). Rama Equipo: cajas nuevas que el jugador coloca (`world.placeRegister`, llegan con robot cajero),
+más reponedores (aparecen en el almacén; evento `hired` → la web les abre ventana de código). Clic en una caja la
+activa/desactiva. De noche cada caja activa recibe un cliente de prueba (`Customer.test`) que no cuenta para nada.
+
+**Velocidad por tamaño del código** (no hay ticks para el jugador): `packages/sim/src/codesize.ts` (`measureCode`)
+cuenta instrucciones del robot y lo que usa de `shared.py`; `World.slowdown(robot)` = freno del servidor × factor del
+código. Clic en un rack con servidor → terminal o rack (`World.openCase` / `removePart`; el montaje deja sacar piezas).
+
+**En línea (Supabase)**: `apps/web/src/online/` (sala/presence/rpc en `room.ts`, Yjs en `collab.ts`, espejo y
+anfitrión en `gamesync.ts`, guardado en `saves.ts`, lobby y nombres). El anfitrión corre todo; el otro jugador tiene un
+mundo espejo (`wrapWorld`/`wrapDb` reenvían sus acciones). Guardar/cargar el mundo: `packages/sim/src/persist.ts`;
+la base del jugador: `GameDB.exportState/importState` (pg_dump). Tabla: `supabase/schema.sql`.
+**La clave secreta de Supabase nunca va en el código.** Para probar dos jugadores: dos contextos de Playwright con
+`cdb.player.v1` distinto y `#partida=ABCD` en la URL.
+
 Pendiente (en orden aproximado):
-1. **M2 online**: servidor autoritativo (Node + Colyseus o ws), salas con código de 4 letras, 2 jugadores, la
-   simulación corre en el servidor. `packages/sim` y `packages/db` ya no dependen del navegador.
-2. **M3**: edición colaborativa del código (Yjs), historial de versiones.
-3. Guardar el estado completo de la partida.
+1. Probar a fondo el modo en línea con dos personas reales (latencia, reconexión).
+2. Historial de versiones del código.
 4. Ideas aceptadas o propuestas: auditoría (comparar la tabla de ventas del jugador con el registro interno),
    etapas 2–7 del GDD, balance (playtest), meta final.

@@ -2,6 +2,7 @@ export { VM, compile, check, type Status, type VariableInfo, type VMOptions } fr
 export { PyError } from "./errors.js";
 export { FEATURES, type Feature } from "./features.js";
 export { parse } from "./parser.js";
+export type { Expr, Program, Stmt, Target } from "./ast.js";
 export {
   Action,
   HostObject,

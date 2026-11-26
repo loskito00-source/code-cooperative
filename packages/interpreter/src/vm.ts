@@ -635,7 +635,7 @@ export class VM {
     if (op === "&" || op === "|") {
       if (typeof a === "boolean" && typeof b === "boolean") return op === "&" ? a && b : a || b;
       if (bothNum && Number.isInteger(num(a)) && Number.isInteger(num(b))) return op === "&" ? num(a) & num(b) : num(a) | num(b);
-      throw new PyError(`'${op}' es para combinar True/False (o filtros de pandas); para condiciones normales usa '${op === "&" ? "and" : "or"}'`, line);
+      throw new PyError(`'${op}' es para combinar True/False; para condiciones normales usa '${op === "&" ? "and" : "or"}'`, line);
     }
     switch (op) {
       case "+":

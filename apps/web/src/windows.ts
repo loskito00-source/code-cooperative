@@ -41,6 +41,13 @@ export function topInset(): number {
   return bar ? Math.ceil(bar.getBoundingClientRect().bottom) + 6 : 56;
 }
 
+/** Borde derecho del explorador de archivos (la barra lateral): las ventanas no pueden quedar debajo de él. */
+export function leftInset(): number {
+  const ex = document.querySelector<HTMLElement>(".explorer");
+  if (!ex) return 4;
+  return Math.ceil(ex.getBoundingClientRect().right) + 6;
+}
+
 function loadAll(): Record<string, Saved> {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
@@ -112,7 +119,8 @@ export class FloatingWindow {
     this.drag(this.el.querySelector(".win-resize")!, (dx, dy, start) =>
       this.place(start.x, start.y, Math.max(opts.minWidth ?? 260, start.w + dx), Math.max(opts.minHeight ?? 140, start.h + dy)),
     );
-    window.addEventListener("resize", () => this.place(this.el.offsetLeft, this.el.offsetTop, this.el.offsetWidth, this.fullHeight(), false));
+    // ojo: una ventana oculta mide 0 de ancho; por eso el ancho "normal" se guarda en dataset.w (como la altura en dataset.h)
+    window.addEventListener("resize", () => this.place(this.el.offsetLeft, this.el.offsetTop, this.fullWidth(), this.fullHeight(), false));
     this.focus();
   }
 
@@ -142,13 +150,22 @@ export class FloatingWindow {
     w = Math.min(w, maxW - 8);
     h = Math.min(h, maxH - 60);
     const top = topInset();
-    x = Math.max(4, Math.min(x, maxW - 80));
+    const left = leftInset();
+    x = Math.max(left, Math.min(x, maxW - 80));
+    w = Math.min(w, maxW - left - 4);
     y = Math.max(top, Math.min(y, maxH - 40));
     h = Math.min(h, maxH - top - 6);
+    w = Math.max(w, this.opts.minWidth ?? 200);
     Object.assign(this.el.style, { left: `${x}px`, top: `${y}px`, width: `${w}px` });
+    this.el.dataset.w = String(w);
     this.el.dataset.h = String(h);
     if (!this.minimized) this.el.style.height = `${h}px`;
     if (save) this.save();
+  }
+
+  /** Ancho normal de la ventana (aunque ahora esté oculta y mida 0). */
+  private fullWidth(): number {
+    return Number(this.el.dataset.w) || this.opts.width;
   }
 
   /** Altura de la ventana abierta (aunque ahora esté minimizada y mida solo la barra). */
@@ -161,7 +178,7 @@ export class FloatingWindow {
     all[this.opts.id] = {
       x: this.el.offsetLeft,
       y: this.el.offsetTop,
-      width: this.el.offsetWidth,
+      width: this.fullWidth(),
       height: this.fullHeight(),
       open: !this.el.hidden,
       minimized: this.minimized,
@@ -176,7 +193,7 @@ export class FloatingWindow {
     if (next === this.zoom) return;
     const ratio = next / this.zoom;
     this.applyZoom(next);
-    this.place(this.el.offsetLeft, this.el.offsetTop, this.el.offsetWidth * ratio, this.fullHeight() * ratio, true);
+    this.place(this.el.offsetLeft, this.el.offsetTop, this.fullWidth() * ratio, this.fullHeight() * ratio, true);
   }
 
   private applyZoom(z: number): void {

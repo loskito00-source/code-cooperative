@@ -61,10 +61,11 @@ while True:
 describe("mapa del Kiosco", () => {
   test("posiciones según el plano (y crece hacia el norte)", () => {
     const w = mundo();
-    expect(w.width).toBe(9);
+    expect(w.width).toBe(15); // con el terreno por ampliar
+    expect(w.openWidth).toBe(9);
     expect(w.height).toBe(6);
     expect(w.warehouse).toEqual({ x: 2, y: 5 }); // junto a la puerta
-    expect(w.register).toEqual({ x: 3, y: 0 });
+    expect(w.register).toMatchObject({ x: 3, y: 0, id: 1, active: true });
     expect(w.entrance).toEqual({ x: 8, y: 5 });
     expect(w.shelves.map((s) => [s.product, s.stock, s.x, s.y])).toEqual([
       [null, 0, 4, 5],
@@ -76,7 +77,7 @@ describe("mapa del Kiosco", () => {
       ["Toño", 2, 5],
       ["Lupe", 3, 0],
     ]);
-    expect(w.warehouseStock).toEqual({ pan: 40, leche: 30, huevos: 36 });
+    expect(w.warehouseStock).toEqual({ pan: 40, leche: 30, huevos: 36, chocolate: 0, queso: 0, miel: 0, aceite: 0, vino: 0 });
   });
 
   test("el almacén es un cuarto aparte: la pared solo se cruza por la puerta", () => {
@@ -94,10 +95,11 @@ describe("mapa del Kiosco", () => {
 });
 
 describe("robots", () => {
-  test("move tarda 4 ticks y no atraviesa bordes", () => {
+  test("move tarda 4 pasos (a velocidad normal) y no atraviesa bordes", () => {
     const w = mundo();
     w.setScript("tono", "a = move(East)\nb = move(North)");
     w.runRobot("tono");
+    w.robot("tono").code!.factor = 1; // velocidad normal (el código corto lo haría más rápido)
     // tick 1-4: el robot está ocupado moviéndose; al empezar el tick 5 llega y sigue con su código
     correr(w, 4);
     expect(w.robot("tono").x).toBe(2);
@@ -193,7 +195,7 @@ describe("robots", () => {
     w.setScript("tono", 'x = 1\npick("pna")');
     w.runRobot("tono");
     correr(w, 2);
-    expect(w.robot("tono").console.at(-1)!.text).toBe("Línea 2: el producto 'pna' no existe. Productos: pan, leche, huevos.");
+    expect(w.robot("tono").console.at(-1)!.text).toBe("Línea 2: el producto 'pna' no existe. Productos: pan, leche, huevos, chocolate, queso, miel, aceite, vino.");
   });
 
   test("errores de sintaxis aparecen al ejecutar", () => {
@@ -285,30 +287,72 @@ while True:
   });
 });
 
-describe("desbloqueos", () => {
-  test("comprar 'for' habilita la sintaxis y descuenta dinero", () => {
+describe("mejoras", () => {
+  test("toda la sintaxis viene desbloqueada desde el inicio", () => {
     const w = new World(1);
-    w.money = 13_000;
     w.setScript("tono", "for i in range(2):\n    pass");
-    w.runRobot("tono");
-    expect(w.robot("tono").console.at(-1)!.text).toContain("todavía no has desbloqueado 'for'");
-    expect(w.buy("for")).toEqual({ ok: true });
-    expect(w.money).toBe(10_000);
     w.runRobot("tono");
     correr(w, 5);
     expect(w.robot("tono").vm!.status).toBe("done");
   });
 
-  test("requisitos, dinero y CPU en caliente", () => {
+  test("requisitos y dinero", () => {
     const w = new World(1);
     w.money = 100_000;
-    expect(w.buy("lists")).toEqual({ ok: false, reason: "primero desbloquea el anterior" });
-    w.setScript("tono", "while True:\n    pass");
-    w.runRobot("tono");
-    expect(w.buy("cpu1")).toEqual({ ok: true });
-    expect(w.robot("tono").vm!.opsPerTick).toBe(100);
+    expect(w.buy("estante2")).toEqual({ ok: false, reason: "primero compra Estante nuevo" });
+    expect(w.buy("cpu1")).toEqual({ ok: false, reason: "no existe" }); // las CPU ya no se compran en Mejoras
     w.money = 0;
-    expect(w.buy("cpu2")).toEqual({ ok: false, reason: "no alcanza el dinero" });
+    expect(w.buy("sala1")).toEqual({ ok: false, reason: "no alcanza el dinero" });
+  });
+
+  test("un estante comprado se coloca donde el jugador elige", () => {
+    const w = new World(1);
+    w.money = 10_000;
+    expect(w.placeShelf(5, 2)).toEqual({ ok: false, reason: "no tienes estantes por colocar" });
+    expect(w.buy("estante1")).toEqual({ ok: true });
+    expect(w.money).toBe(6_000);
+    expect(w.shelvesToPlace).toBe(1);
+    expect(w.placeShelf(w.register.x, w.register.y)).toMatchObject({ ok: false });
+    expect(w.placeShelf(6, 0)).toEqual({ ok: false, reason: "ahí hacen fila los clientes" });
+    expect(w.placeShelf(10, 2)).toEqual({ ok: false, reason: "ese terreno todavía no es de la tienda" });
+    const r = w.placeShelf(5, 2);
+    expect(r.ok).toBe(true);
+    expect(w.shelvesToPlace).toBe(0);
+    expect(w.tileAt(5, 2)).toBe("shelf");
+    // get_shelves() sigue de oeste a este
+    expect(w.shelves.map((s) => s.x)).toEqual([4, 5, 5, 6, 7]);
+  });
+
+  test("ampliar el local abre el terreno del este y caben más clientes", () => {
+    const w = new World(1);
+    w.money = 100_000;
+    expect(w.openWidth).toBe(9);
+    expect(w.tileAt(9, 3)).toBeNull();
+    expect(w.maxCustomers).toBe(8);
+    w.buy("estante1");
+    expect(w.buy("local1")).toEqual({ ok: true });
+    expect(w.openWidth).toBe(12);
+    expect(w.tileAt(9, 3)).toBe("floor");
+    expect(w.tileAt(12, 3)).toBeNull();
+    expect(w.maxCustomers).toBe(12);
+    expect(w.lockedLots).toEqual([2]);
+  });
+
+  test("el marketing trae más clientes", () => {
+    const contar = (comprar: string[]) => {
+      const w = new World(4);
+      w.money = 1_000_000;
+      for (const id of comprar) expect(w.buy(id)).toEqual({ ok: true });
+      let llegaron = 0;
+      for (let i = 0; i < 6000; i++) {
+        w.step();
+        llegaron += w.drainEvents().filter((e) => e.type === "record" && e.record.kind === "customer_arrived").length;
+        w.customers.length = 0; // que no se llene la tienda
+        w.queue = [];
+      }
+      return llegaron;
+    };
+    expect(contar(["volantes", "letrero", "radio", "redes"])).toBeGreaterThan(contar([]) * 1.5);
   });
 });
 
@@ -395,7 +439,7 @@ describe("la noche (preparación) antes de abrir", () => {
     surtir(w);
     w.startNight(10 * 60 * 1000);
     correr(w, 3 * MINUTO);
-    expect(w.customers).toEqual([]);
+    expect(w.customers.filter((c) => !c.test)).toEqual([]); // (de noche solo está el cliente de prueba)
     w.updateNight(9 * 60 * 1000);
     expect(w.night).not.toBeNull();
     w.updateNight(60 * 1000);
@@ -403,7 +447,7 @@ describe("la noche (preparación) antes de abrir", () => {
     expect(w.customersEnabled).toBe(true);
     expect(w.drainEvents().some((e) => e.type === "opened" && e.reason === "tiempo")).toBe(true);
     correr(w, 2 * TICKS_PER_SECOND);
-    expect(w.customers).toEqual([]); // el primero llega 3 s después de abrir
+    expect(w.customers).toEqual([]); // el primero llega 3 s después de abrir (y el de prueba ya se fue)
     correr(w, 2 * TICKS_PER_SECOND);
     expect(w.customers.length).toBe(1);
   });
@@ -467,11 +511,12 @@ describe("día y noche", () => {
     w.runRobot("lupe");
     w.openStore();
     correr(w, DAY.ticks);
-    const adentro = w.customers.length;
-    const ids = new Set(w.customers.map((c) => c.id));
+    const reales = () => w.customers.filter((c) => !c.test);
+    const adentro = reales().length;
+    const ids = new Set(reales().map((c) => c.id));
     correr(w, 2 * MINUTO);
-    expect(w.customers.every((c) => ids.has(c.id))).toBe(true); // nadie nuevo
-    expect(w.customers.length).toBeLessThanOrEqual(adentro);
+    expect(reales().every((c) => ids.has(c.id))).toBe(true); // nadie nuevo (fuera del cliente de prueba)
+    expect(reales().length).toBeLessThanOrEqual(adentro);
   });
 
   test("el resumen del día cuenta ventas, plata y clientes perdidos", () => {
@@ -504,3 +549,94 @@ describe("día y noche", () => {
     expect(llegadas(5)).toBeGreaterThan(llegadas(1));
   });
 });
+
+const CAJERO = `
+while True:
+    if has_customer():
+        total = 0
+        for p in scan_item():
+            total = total + price(p)
+        pago = take_payment(total)
+        give_change(pago - total)
+        next_customer()
+    else:
+        wait()
+`;
+
+describe("equipo: cajas y robots nuevos", () => {
+  test("una caja comprada se coloca donde el jugador elige y llega con su cajero", () => {
+    const w = mundo();
+    w.money = 100_000;
+    expect(w.placeRegister(6, 3)).toEqual({ ok: false, reason: "no tienes cajas por colocar" });
+    expect(w.buy("caja2")).toEqual({ ok: true });
+    expect(w.registersToPlace).toBe(1);
+    expect(w.placeRegister(4, 0)).toEqual({ ok: false, reason: "ahí hace fila otra caja" });
+    expect(w.placeRegister(7, 3)).toEqual({ ok: false, reason: "los clientes necesitan 2 casillas libres al este para hacer fila" });
+    const r = w.placeRegister(5, 3);
+    expect(r.ok).toBe(true);
+    expect(w.registers.map((x) => [x.id, x.x, x.y])).toEqual([[1, 3, 0], [2, 5, 3]]);
+    const memo = w.robot("memo");
+    expect([memo.x, memo.y, memo.role]).toEqual([5, 3, "cajero"]);
+    expect(w.shelfProblem(6, 3)).toBe("ahí hacen fila los clientes");
+    expect(w.drainEvents().some((e) => e.type === "hired" && e.robotId === "memo")).toBe(true);
+  });
+
+  test("comprar un reponedor trae un robot nuevo al almacén", () => {
+    const w = mundo();
+    w.money = 100_000;
+    expect(w.buy("robot1")).toEqual({ ok: true });
+    const chucho = w.robot("chucho");
+    expect(w.inWarehouse(chucho.x, chucho.y)).toBe(true);
+    expect(chucho.cpu.server).toBe(w.robot("tono").cpu.server);
+    expect(chucho.ip).toBe("10.0.0.23");
+    expect(w.robots.length).toBe(3);
+  });
+
+  test("una caja inactiva no atiende y pasa su fila a otra caja activa", () => {
+    const w = mundo();
+    w.money = 100_000;
+    w.buy("caja2");
+    w.placeRegister(5, 3);
+    surtir(w);
+    // las dos cajas reciben clientes (cada uno va a la de menos fila)
+    for (let i = 0; i < 6 * MINUTO && w.registers.some((r) => r.queue.length < 2); i++) w.step();
+    expect(w.registers.every((r) => r.queue.length >= 2)).toBe(true);
+    w.setRegisterActive(2, false);
+    expect(w.customerAtRegister(w.robot("memo"))).toBeNull();
+    expect(w.registers[1].queue.filter((c) => c.checkout.scanned === 0).length).toBe(0);
+    correr(w, MINUTO);
+    expect(w.queue.every((c) => c.register!.id === 1)).toBe(true);
+  });
+
+  test("de noche llega un cliente de prueba: se puede cobrar sin mover plata ni productos", () => {
+    const w = mundo();
+    surtir(w);
+    w.startNight();
+    correr(w, 2);
+    const prueba = w.registers[0].queue[0];
+    expect(prueba.test).toBe(true);
+    const plata = w.money;
+    const stock = w.shelves.map((s) => s.stock);
+    w.setScript("lupe", CAJERO);
+    w.runRobot("lupe");
+    const tiquetes: boolean[] = [];
+    for (let i = 0; i < 200; i++) {
+      w.step();
+      for (const e of w.drainEvents()) if (e.type === "ticket") tiquetes.push(!!e.ticket.test && e.ticket.result === "ok");
+      if (e_records(w)) throw new Error("no debe guardar nada");
+    }
+    expect(tiquetes.length).toBeGreaterThanOrEqual(2); // despide a uno y llega otro
+    expect(tiquetes.every(Boolean)).toBe(true);
+    expect(w.money).toBe(plata);
+    expect(w.shelves.map((s) => s.stock)).toEqual(stock);
+    expect(w.tickets.length).toBe(0);
+    // al amanecer los de prueba se van
+    w.openStore();
+    expect(w.customers.some((c) => c.test)).toBe(false);
+  });
+});
+
+/** ¿Quedó algún registro para la base de datos en los eventos pendientes? */
+function e_records(w: World): boolean {
+  return w.drainEvents().some((e) => e.type === "record");
+}

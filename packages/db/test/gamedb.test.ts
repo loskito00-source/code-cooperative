@@ -1,5 +1,5 @@
 import { FEATURES } from "@cdb/interpreter";
-import { TICKS_PER_SECOND, World } from "@cdb/sim";
+import { PRODUCT_NAMES, TICKS_PER_SECOND, World } from "@cdb/sim";
 import { beforeAll, describe, expect, test } from "vitest";
 import { GameDB, type QueryResult, type SavedQuery } from "../src/index.js";
 
@@ -116,9 +116,10 @@ describe("base de datos de la tienda", () => {
 
   test("el stock de products es el de los estantes", async () => {
     const r = ok(await db.systemRun("SELECT name, stock FROM products ORDER BY id"));
-    expect(r.rows.map(([n, s]) => [n, Number(s)])).toEqual((["pan", "leche", "huevos"] as const).map((p) => [p, world.shelfStock(p)]));
+    expect(r.rows.map(([n, s]) => [n, Number(s)])).toEqual(PRODUCT_NAMES.map((p) => [p, world.shelfStock(p)]));
     const w = ok(await db.systemRun("SELECT name, warehouse, shelf_x FROM products ORDER BY id"));
-    expect(w.rows.map(([n, q, x]) => [n, Number(q), x])).toEqual((["pan", "leche", "huevos"] as const).map((p) => [p, world.warehouseStock[p], world.shelves.find((s) => s.product === p)!.x]));
+    // los premium no tienen estante en esta partida: shelf_x es null
+    expect(w.rows.map(([n, q, x]) => [n, Number(q), x])).toEqual(PRODUCT_NAMES.map((p) => [p, world.warehouseStock[p], world.shelves.find((s) => s.product === p)?.x ?? null]));
   });
 
   test("las horas son la hora del juego (el día 1 va de 7:00 a 19:00 del 5 de enero de 2026)", async () => {

@@ -1,8 +1,9 @@
 // Menú principal. El HTML está en index.html (para que se vea desde el primer cuadro, antes que la barra del juego);
 // aquí se le da vida: progreso de carga, teclado, cursor, paneles, sonido, polvo en el aire y la salida al juego.
 import type { AudioEngine } from "./audio.js";
+import { Lobby, type OnlineChoice } from "./online/lobby.js";
 
-type Panel = "how" | "options" | "credits";
+type Panel = "how" | "options" | "credits" | "online";
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -19,6 +20,10 @@ export class MainMenu {
   /** Se cumple cuando el jugador entra a la tienda (y la animación de salida ya tapó el menú). */
   readonly entered = new Promise<void>((r) => (this.resolveEnter = r));
   private dustStop: (() => void) | null = null;
+  private readonly online = this.el.querySelector<HTMLButtonElement>('[data-action="online"]')!;
+  private lobby: Lobby | null = null;
+  /** Lo que eligió en "Jugar en línea" (null = partida local). */
+  onlineChoice: OnlineChoice | null = null;
 
   constructor(private readonly audio: AudioEngine) {
     this.el.classList.add("live");
@@ -57,6 +62,7 @@ export class MainMenu {
     this.ready = true;
     this.play.style.setProperty("--p", "1");
     this.play.removeAttribute("aria-disabled");
+    this.online.removeAttribute("aria-disabled");
     this.playSub.textContent = "Partida nueva. Empieza cuando llega el camión del distribuidor.";
     this.el.classList.add("scene-ready");
   }
@@ -122,6 +128,16 @@ export class MainMenu {
     p.hidden = false;
     this.el.classList.add("panel-open");
     if (name === "options") this.renderOptions();
+    if (name === "online") {
+      this.lobby ??= new Lobby(p);
+      void this.lobby.open().then((choice) => {
+        this.onlineChoice = choice;
+        this.panel = null;
+        p.hidden = true;
+        this.el.classList.remove("panel-open");
+        this.enter();
+      });
+    }
     p.classList.add("in"); // es una animación con @keyframes: no hace falta esperar un cuadro
     (p.querySelector<HTMLElement>("input, .mp-back"))!.focus({ preventScroll: true });
   }
@@ -130,6 +146,7 @@ export class MainMenu {
     if (!this.panel) return;
     this.audio.cue("ui-back");
     const name = this.panel;
+    if (name === "online") this.lobby?.close();
     this.panel = null;
     const p = this.el.querySelector<HTMLElement>(`.menu-panel[data-panel="${name}"]`)!;
     p.classList.remove("in");
@@ -163,6 +180,13 @@ export class MainMenu {
         (input.nextElementSibling as HTMLOutputElement).textContent = `${input.value}%`;
       }
     }
+  }
+
+  /** Entra directo a una partida en línea (al recargar con #partida=ABCD en la dirección). */
+  joinNow(choice: OnlineChoice): void {
+    if (this.leaving) return;
+    this.onlineChoice = choice;
+    this.enter();
   }
 
   /** Salida: el láser del lector barre la pantalla, el menú se va y el juego queda detrás. */

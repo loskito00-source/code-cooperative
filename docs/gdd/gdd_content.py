@@ -118,7 +118,9 @@ S["game_mechanics"] = {
             "title": "5.1 Tiempo, ticks y ejecución de scripts",
             "content": """Entrada: el jugador asigna un script a un robot y presiona Ejecutar (o Detener).
 
-Sistema: el servidor simula la tienda a 10 ticks por segundo. Cada robot ejecuta su script como una corrutina: en cada tick dispone de un presupuesto de operaciones para el intérprete (asignaciones, comparaciones, llamadas). Las acciones físicas (moverse, tomar, cobrar) consumen ticks enteros y bloquean al robot mientras duran.
+**Implementado (reemplaza a los ticks para el jugador):** la velocidad de cada robot depende del **tamaño de su código**. Se cuentan instrucciones (no líneas de texto; los comentarios y las líneas en blanco no cuentan). Con 20 instrucciones va a velocidad normal; cada instrucción de más o de menos cambia la duración de sus acciones un 2,5 % (de ×2 más rápido con 4 o menos, a ×0,4 con 80 o más). Para que no se pueda hacer trampa pasando el código a shared.py, también cuentan las funciones de shared que el robot usa (con `shared.f()` o `from shared import f`), las que esas llaman, y lo que shared ejecuta al importarse; si el robot usa el módulo de otra forma (lo guarda en una variable o lo pasa), cuenta todo shared. La velocidad se fija al presionar Ejecutar y se ve en la barra de cada ventana de robot. El servidor sigue frenando (bucle sin wait(), ataques, malware, calor). Ya no se muestran ticks en la interfaz y no hay mejoras de CPU en el árbol. Código: `packages/sim/src/codesize.ts`.
+
+Diseño original (referencia): el servidor simula la tienda a 10 ticks por segundo. Cada robot ejecuta su script como una corrutina: en cada tick dispone de un presupuesto de operaciones para el intérprete (asignaciones, comparaciones, llamadas). Las acciones físicas (moverse, tomar, cobrar) consumen ticks enteros y bloquean al robot mientras duran.
 
 Feedback: la línea en ejecución se resalta en el editor; el robot muestra una barra de progreso sobre la cabeza durante acciones largas.
 
@@ -158,7 +160,7 @@ Los robots no tienen dueño: cualquiera de los 2 jugadores puede editar su scrip
             "title": "5.3 Reposición de estantes",
             "content": """Entrada: pick(product, n) en cualquier casilla del almacén, place() sobre un estante, warehouse_stock(product), shelf.stock(), shelf.product().
 
-Sistema: el almacén es un cuarto con la mercancía que trajo el distribuidor, y su contenido ES la tabla de inventario que el jugador diseñó en la misión: las unidades salen de su columna de cantidad, cada pick() las descuenta de esa tabla y, si el jugador la edita con SQL, el almacén cambia. Si la tabla no tiene columna de cantidad, el almacén queda vacío. En cuanto el robot entra al cuarto puede tomar cualquier producto. Si un producto se acaba en el almacén, pick() lo pide al proveedor del barrio, que cobra el 60% del precio.
+Sistema: el almacén es un cuarto con la mercancía que trajo el distribuidor, y su contenido ES la tabla de inventario que el jugador diseñó en la misión: las unidades salen de su columna de cantidad, cada pick() las descuenta de esa tabla y, si el jugador la edita con SQL, el almacén cambia. Si la tabla no tiene columna de cantidad, el almacén queda vacío. En cuanto el robot entra al cuarto puede tomar cualquier producto. Si un producto básico se acaba en el almacén, pick() lo pide al proveedor del barrio, que cobra el 60% del precio; los productos premium solo llegan pidiéndolos a El Surtidor (5.8).
 
 Los estantes empiezan vacíos y libres. Cada estante tiene un solo producto: el primero que se ponga con place() lo define y queda así toda la partida (un estante de pan no acepta leche). Así los jugadores deciden cómo repartir los productos (p. ej. dos estantes de pan). Capacidad de 10 unidades por estante. Los clientes van al estante más cercano que tenga su producto; si no hay, se marca como "no encontrado".
 
@@ -269,9 +271,26 @@ El reto natural es ordenar FIFO: reponer primero lo que vence antes y retirar lo
         },
         {
             "title": "5.8 Proveedores y pedidos",
-            "content": """Entrada: order(product, n), get_sales_history(product, dias).
+            "content": """Implementado (prototipo): la página de la Distribuidora El Surtidor en el Navegador del juego (elsurtidor.test, sitio ficticio). Es el mismo distribuidor del camión de la intro.
 
-Sistema: el pedido llega al Muelle de carga tras 1 día de juego. El costo es el 60% del precio de venta. Pedidos mayores a 100 unidades tienen 10% de descuento. Si se pide de más, los perecederos se pierden; si se pide de menos, hay estantes vacíos. Es un problema de predicción de demanda."""
+Entrada: el jugador elige cuántas cajas (de 10 unidades, máximo 9 por producto) pide de cada producto y paga al pedir. El repartidor llega 1 minuto de juego después y deja un Excel pedido_N.xlsx en la carpeta entregas del explorador.
+
+Migración: la mercancía NO entra sola al almacén. El almacén es la tabla de inventario del jugador, así que hay que migrar el Excel: pd.read_excel("pedido_1.xlsx"), hoja.select("A1", hoja.last_cell), limpiar con Python y subir con cursor.execute (INSERT si el producto es nuevo, UPDATE cantidad = cantidad + n si ya estaba). El Excel tiene SIEMPRE la misma estructura que entrega_distribuidor.xlsx (mismas columnas, la fila TOTAL al final, nombres desordenados y a veces una fila anotada dos veces), así que el mismo script sirve para todos los pedidos. hoja.last_cell da la última celda porque el número de filas cambia.
+
+| Producto | Precio | Costo (El Surtidor) | Demanda | Tipo |
+| --- | --- | --- | --- | --- |
+| pan, leche, huevos | $2.000 / $4.500 / $3.800 | 50% (mayorista) | 1 | Básico |
+| chocolate | $9.000 | $4.500 | 2,2 | Premium |
+| queso | $16.000 | $8.000 | 2 | Premium |
+| miel | $22.000 | $11.000 | 1,8 | Premium |
+| aceite | $26.000 | $13.000 | 1,8 | Premium |
+| vino | $48.000 | $24.000 | 1,6 | Premium |
+
+Productos premium: cuestan más pero se venden mucho mejor. (1) Los clientes los piden según su demanda: un producto con demanda 2 sale el doble de veces que el pan. (2) Cada producto premium con unidades en los estantes trae 12% más clientes. Los clientes solo piden lo premium que la tienda vende (que tiene estante), así que con 4 estantes el jugador decide qué vender. Los básicos los sigue trayendo el proveedor del barrio desde pick() (60% del precio); lo premium no: si se acaba, hay que pedirlo otra vez.
+
+En el almacén 3D, las estanterías premium (pared oeste) aparecen cuando llega su primera mercancía migrada.
+
+Pendiente (diseño original): get_sales_history(product, dias), descuento por volumen, perecederos que se pierden si se pide de más."""
         },
         {
             "title": "5.9 Comunicación entre robots",
@@ -324,11 +343,13 @@ La hoja del distribuidor (entrega_distribuidor.xlsx) viene desordenada a propós
 | Subir pan, leche y huevos | una tabla del jugador contiene los tres nombres |
 | Sin repetidos ni TOTAL | cada producto aparece una vez y no hay una fila "total" |
 
+El panel tiene un botón Saltar (con confirmación): crea por el jugador la tabla inventario con la hoja ya limpia y pasa directo a la primera noche.
+
 Al completar la misión, las cajas del camión "entran" al almacén y se habilita Abrir la tienda: la cámara vuela del callejón a la tienda y cae la primera noche (5.12).
 
-pandas sencillo: read_excel, read_sql, DataFrame, head/tail, shape, columns, df["col"], df[["a","b"]], filtros con & y |, rename, drop, dropna, fillna, drop_duplicates, sort_values, iterrows, to_dict, columnas calculadas, .str (strip, lower, upper, title, replace, contains) y to_sql. to_sql NO crea tablas: el jugador diseña el esquema con CREATE TABLE.
+pandas del juego (a propósito, solo dos comandos): pd.read_excel(archivo) devuelve la hoja (print la muestra con letras de columna y números de fila) y hoja.select("A1", "G6") devuelve las celdas del rango como una lista de diccionarios, uno por fila, con los encabezados de la fila 1 como claves. Limpiar (quitar repetidos, saltar la fila TOTAL, strip/lower) lo hace el jugador con Python normal, y sube cada fila con SQL: cursor.execute("INSERT INTO ... VALUES (%s, %s)", (a, b)). Nada crea tablas por él: diseña el esquema con CREATE TABLE.
 
-Base de datos desde el código (estilo asyncpg, sin await): db.execute, db.fetch, db.fetchrow, db.fetchval y db.executemany con parámetros $1, $2... Por ejemplo, la cajera puede registrar cada venta en la tabla que el jugador diseñó.
+Base de datos desde el código (sin await): cursor.execute, cursor.fetch, cursor.fetchrow, cursor.fetchval y cursor.executemany con parámetros %s (o $1, $2...) en una tupla. Por ejemplo, la cajera puede registrar cada venta en la tabla que el jugador diseñó.
 
 Permisos: el jugador (rol jugador de PostgreSQL) solo tiene su esquema public; el registro interno del juego (esquema registro) no existe para él. Las tablas del jugador se guardan en el navegador (IndexedDB)."""
 })
@@ -361,7 +382,46 @@ Música (toda procedural): "inventario" durante la misión (pensativa), "mañana
 [PLAYTEST: ¿10 minutos de noche es mucho cuando el código ya está listo? Se puede abrir antes votando.]"""
 })
 
-S["progression_system"] = """La progresión se compra con dinero. Hay 4 tipos de desbloqueo: sintaxis, comandos, contenido (productos, robots) y mejoras numéricas.
+S["progression_system"] = """La progresión se compra con dinero en el **árbol de Mejoras** (ventana Mejoras). Toda la sintaxis de Python viene desbloqueada desde el inicio: lo que se compra es la tienda.
+
+## Árbol de Mejoras (implementado)
+Tres ramas. Cada mejora se une a las que necesita; las que ya se pueden comprar brillan con el color de su rama.
+| Rama | Mejora | Costo | Necesita | Efecto |
+|---|---|---|---|---|
+| La tienda | Estante nuevo | $4.000 | - | +1 estante; el jugador elige la casilla en la tienda |
+| La tienda | Dos estantes | $9.000 | Estante nuevo | +2 estantes |
+| La tienda | Ampliar el local | $25.000 | Estante nuevo | Abre el terreno 1: 3 columnas al este; caben 4 clientes más |
+| La tienda | Tres estantes | $20.000 | Ampliar el local, Dos estantes | +3 estantes |
+| La tienda | Supermercado | $60.000 | Ampliar el local | Abre el terreno 2: otras 3 columnas; 4 clientes más |
+| La tienda | Cuatro estantes | $40.000 | Supermercado, Tres estantes | +4 estantes |
+| Marketing | Volantes | $3.000 | - | 15 % más clientes |
+| Marketing | Música ambiental | $8.000 | Volantes | 50 % más paciencia en la fila |
+| Marketing | Letrero luminoso | $12.000 | Volantes | 20 % más clientes |
+| Marketing | Cuña en la radio | $30.000 | Letrero | 30 % más clientes |
+| Marketing | Redes sociales | $70.000 | Radio | 40 % más clientes |
+| Equipo | Segunda caja | $20.000 | - | Otra caja con su robot cajero (Memo); el jugador elige dónde ponerla |
+| Equipo | Tercera caja | $45.000 | Segunda caja | Otra caja con su cajera (Kika) |
+| Equipo | Robot reponedor | $15.000 | - | Un robot como Toño (Chucho) aparece en el almacén |
+| Equipo | Otro reponedor | $35.000 | Robot reponedor | Otro reponedor (Rosa) |
+| Centro de datos | Sala más grande | $12.000 | - | Caben 2 racks (el gabinete se compra en TecnoMercado) |
+| Centro de datos | Centro de datos | $35.000 | Sala más grande | Caben 3 racks |
+
+Cajas: cada caja tiene su propia fila hacia el este (5 casillas donde no caben estantes) y su cajero solo atiende esa fila. Cada cliente se forma en la caja activa con menos fila. Clic en una caja la activa o la desactiva: una caja inactiva no recibe clientes y su fila (los que no han empezado a ser atendidos) pasa a otra caja activa. Con todas cerradas no entra nadie. Para colocar una caja se necesitan 2 casillas libres al este; el cajero llega parado en ella con una ventana de código propia.
+
+Mantenimiento de servidores: clic en un rack con servidor pregunta si abrir la terminal o el rack. Abrir el rack apaga el servidor (sus robots se detienen) y vuelve a mostrar su montaje: clic en una pieza montada la saca al almacén (lo que va encima hay que sacarlo antes; los cables que dependen de ella se sueltan). Al cerrar la tapa y pasar el POST vuelve a encender con su Linux, su red y sus archivos, y con las especificaciones nuevas.
+
+Cliente de prueba (noche): mientras la tienda está cerrada, a cada caja activa llega siempre un cliente de prueba con 1 a 3 productos. Se atiende con el mismo código, pero no mueve plata, no gasta productos, no cambia la reputación ni queda en la base de datos; el tiquete sale marcado "PRUEBA" y un globo dice si cobró bien. Al despedirlo llega otro en 3 s. Al amanecer se van.
+
+Robots nuevos: cada robot corre en el mismo servidor que los demás y ocupa RAM y CPU, así que comprar robots empuja a mejorar el centro de datos.
+
+Colocar estantes: al comprarlos, la tienda entra en modo colocar (casillas válidas en verde, un estante fantasma sigue al mouse). No se puede en la fila de la caja, frente a la entrada, frente a la puerta del almacén ni en terreno sin comprar. Esc o clic derecho lo deja para después (botón "Colocar en la tienda" en Mejoras). get_shelves() los devuelve de oeste a este.
+
+Terreno por ampliar: el mapa ya tiene el tamaño final (15 x 6) y las columnas sin comprar se ven como obra con cinta amarilla; los robots no pueden entrar. Las coordenadas nunca cambian al ampliar, así que el código de los jugadores sigue sirviendo.
+
+[PLAYTEST: costos del árbol y cuánto pesa el marketing frente a la reputación.]
+
+## Diseño original (referencia)
+Hay 4 tipos de desbloqueo: sintaxis, comandos, contenido (productos, robots) y mejoras numéricas.
 
 ## Etapas de la tienda
 | Etapa | Tamaño | base_etapa | Se requiere | Problema nuevo |
@@ -374,8 +434,8 @@ S["progression_system"] = """La progresión se compra con dinero. Hay 4 tipos de
 | 6. Supermercado | 24x18 | 22 | $1.500.000 | Proveedores, ofertas, IVA |
 | 7. Hipermercado | 32x24 | 30 | $4.000.000 | Almacén grande, rutas óptimas |
 
-## Árbol de sintaxis
-Al inicio solo existen llamadas a funciones del juego y while True. Lo demás se compra:
+## Árbol de sintaxis (descartado: ahora toda la sintaxis viene desbloqueada)
+Diseño anterior: al inicio solo existían llamadas a funciones del juego y while True. Lo demás se compraba:
 | Desbloqueo | Costo | Etapa mínima |
 |---|---|---|
 | if / else | $1.000 | 1 |
@@ -468,14 +528,14 @@ S["ux_interface"] = """## Pantallas
 | Inicio | URL | Crear sala / Unirse con código | Lobby |
 | Lobby de sala | Inicio | Esperar al amigo, ver récord | Juego |
 | Juego | Lobby | Ver tienda + editar código | Lobby (salir) |
-| Árbol de desbloqueos | Juego (tecla U) | Comprar | Juego |
+| Árbol de Mejoras | Juego (botón Mejoras) | Comprar, colocar estantes | Juego |
 | Cuadre del día | Automático al final del día | Leer y cerrar | Juego |
 
 ## Layout de la pantalla de juego
 Inspirado en The Farmer Was Replaced: el juego ocupa toda la pantalla y el código vive en ventanas flotantes.
 ```
 +------------------------------------------------------------------+
-| Letrero: $ | Rep | $/min | Reloj | Velocidad | [Toño][Lupe][shared][Tiquetes][Desbloqueos][Comandos]
+| Letrero: $ | Rep | $/min | Reloj | Velocidad | [Navegador][Tiquetes][Mejoras][Base de datos][Comandos]
 +---------------------+--------------------------------------------+
 | Ventana: Toño       |                                   alertas  |
 |  [Ejecutar][Detener]|                                            |
@@ -541,7 +601,7 @@ Diagonal desde arriba (perspectiva, 30°). Se puede girar y acercar con el rató
 |---|---|
 | Letrero (barra superior) | Amarillo #F6C945 con tinta #3A1F0F |
 | Ventanas de código (pizarra) | Verde pizarra #1E2923 con marco de madera #8A5A32 |
-| Ventanas de papel (tiquetes, desbloqueos) | Papel #FBF8EF |
+| Ventanas de papel (tiquetes, mejoras, comandos) | Papel #FBF8EF |
 | Dinero y éxito | Verde #3FA34D |
 | Alertas | Rojo #E2483D |
 | Robot equipo A / B | Cian #2EC4D6 / Naranja #F28C28 |
@@ -616,12 +676,19 @@ S["technical_requirements"] = """## Stack propuesto
 |---|---|---|
 | Lenguaje | TypeScript en todo el proyecto | Un solo lenguaje para cliente, servidor e intérprete |
 | Intérprete | Propio: subconjunto de Python (lexer, parser, evaluador por pasos) | Control de ticks, bloqueo de sintaxis no desbloqueada, sandbox seguro, determinista |
-| Servidor | Node.js + Colyseus (o ws + lógica propia) | Salas y sincronización de estado listas |
+| En línea (implementado) | Supabase Realtime (broadcast + presence) | Sin servidor propio: el navegador del anfitrión corre la tienda |
 | Render | Three.js r187 | Escena 3D con modelos GLB de Kenney, sombras y animaciones |
 | Editor | CodeMirror 6 + y-codemirror | Resaltado Python y edición colaborativa |
 | Colaboración | Yjs | CRDT probado |
-| Persistencia | SQLite (better-sqlite3) | Simple para 1 servidor; migrable a Postgres |
-| Hosting | 1 VPS pequeño o Fly.io/Render | Suficiente para pocas salas |
+| Persistencia (implementado) | Supabase (tabla partidas): mundo en JSON, código Yjs y base del jugador con pg_dump | Partidas públicas, se guardan cada 45 s |
+| Hosting | Sitio estático en Vercel | Todo corre en el navegador |
+
+## Modo en línea (implementado)
+- Lobby en el menú: tu nombre y color, abrir una tienda nueva, entrar con un código de 4 letras y la lista de tiendas guardadas (todas públicas).
+- El anfitrión (el que lleva más tiempo en la sala) corre la simulación, PostgreSQL, las terminales e inventario.py. El otro jugador ve un espejo que se actualiza unas 7 veces por segundo; sus acciones se aplican al tiro y se le piden al anfitrión.
+- Todo es en tiempo real: el código (Yjs, con el cursor y el nombre del otro), la tienda, la terminal, los votos de la noche, las ventanas de la historia (si uno presiona Continuar, avanzan los dos) y el montaje del rack (si uno lo abre, al otro también; las piezas aparecen en vivo).
+- Los dos les ponen nombre a los robots al crear la partida y a cada robot o caja que compran.
+- Si el anfitrión se va, el otro sigue desde el último guardado.
 
 ## Intérprete (pieza crítica)
 - Soporta: int, float, str, bool, None, listas, diccionarios, if/elif/else, while, for-in, range, def, return, break, continue, import shared y operadores básicos.
@@ -635,7 +702,6 @@ S["technical_requirements"] = """## Stack propuesto
 ```
 /packages/interpreter   intérprete Python (sin dependencias, con tests)
 /packages/sim           simulación de la tienda (pura, determinista, con tests)
-/apps/server            Colyseus + persistencia
 /apps/web               Three.js + CodeMirror + ventanas flotantes
 /docs                   este GDD
 ```
@@ -741,3 +807,26 @@ S["appendices"] = {
         },
     ],
 }
+
+S["game_mechanics"]["subsections"].append({
+    "title": "5.13 Servidores, hardware y ciberseguridad",
+    "content": """El código de los robots corre en servidores de un cuarto de la tienda. La partida empieza con srv-01 (10.0.0.10, 1 núcleo, 2 GB). La CPU se reparte entre los robots: un bucle sin wait() la satura y, desde el 80% de carga, TODOS los robots del servidor van más lento (hasta 2,5× al 100%). La RAM limita cuántos robots corren (0,5 GB el sistema + 0,5 GB por robot). Sin servidor o con el servidor apagado, los robots se detienen.
+
+Después de la misión del inventario, la misión "Monta tu servidor": en la sala de servidores (anexo al oeste de la tienda; empieza con 1 gabinete de rack y caben 3: los otros se compran en TecnoMercado) los jugadores montan el primer servidor a mano en primera persona (arrastrar placa, CPU, disipador, RAM, disco, fuente y los 4 cables; pantalla POST con mensajes claros), instalan Linux en la terminal (instalador: nombre, usuario, contraseña), configuran la red (ip addr, ip route), instalan robot-agent con apt y conectan a Toño y Lupe con robot attach. Por eso la primera noche dura 20 minutos. Ataques desde el día 2. Temperatura: un servidor al 100% sin ventilador pasa de 85 °C y va 1,5× más lento; el aire acondicionado lo evita. GPU: scan_item() el doble de rápido.
+
+Más adelante: tienda en línea de componentes (llegan en el camión al día siguiente), ataques que solo frenan (escaneo, fuerza bruta SSH, DDoS, malware) con defensas (firewall, fail2ban, antivirus), logs y rastreo del atacante con 10 técnicas distintas que rotan (VPN caída, strings del malware, conexiones en vivo, inyección SQL, phishing, OSINT en un foro, honeypot, horarios, aparato infectado en la red, registro de dominio), con capas y señuelos. La denuncia con la IP real da un bug bounty; acusar a un inocente baja la reputación. Todas las IPs son ficticias (rangos de documentación).
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| 1 | Modelo de servidores (CPU, RAM, lentitud) | Hecho |
+| 2 | Terminal + Linux + logs | Hecho |
+| 3 | Red e IPs (ping, ssh, robot attach) | Hecho |
+| 4 | Tienda en línea (TecnoMercado) | Hecho |
+| 5 | Montaje en primera persona | Hecho |
+| 6 | Ataques y defensas | Hecho |
+| 7 | Rastreo, denuncia y bounty | Hecho |
+| 8 | GPU (scan_item el doble de rápido), temperatura | Hecho; balance en playtest |
+
+Detalle completo: docs/servidores.md."""
+})
+

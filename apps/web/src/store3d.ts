@@ -4,8 +4,9 @@ import { type GLTF, GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { buildAlley, buildTruck, cardboardBox, type Truck } from "./alley.js";
 import { mergeStatic, QualityGovernor } from "./perf.js";
+import { ServerRoom } from "./serverroom.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
-import { type Customer, type ProductName, type Robot, type SimEvent, WAREHOUSE_START, type World } from "@cdb/sim";
+import { type Customer, PRODUCT_NAMES, PRODUCTS, type ProductName, type Register, type Robot, type Shelf, type SimEvent, type World } from "@cdb/sim";
 
 export interface StoreHooks {
   world: () => World;
@@ -18,6 +19,25 @@ export interface StoreHooks {
   onCue?: (cue: string) => void;
   /** Pixeles tapados a la izquierda por las ventanas: la tienda se centra en el resto. */
   leftInset: () => number;
+  /** Clic en un puesto del rack del cuarto de servidores. */
+  onRack?: (slot: number) => void;
+  /** Modo colocar (estante o caja): el jugador eligió una casilla (devuelve null si se puso, o por qué no). */
+  onPlace?: (kind: PlaceKind, x: number, y: number) => string | null;
+  /** Modo colocar: el jugador lo dejó para después (Esc o clic derecho). */
+  onPlaceCancel?: (kind: PlaceKind) => void;
+  /** Clic en una caja registradora (para activarla o desactivarla). */
+  onRegister?: (id: number) => void;
+}
+
+
+export type PlaceKind = "shelf" | "register";
+
+/** El primer choque con algo que se ve (el objeto y todos sus padres visibles). */
+function visibleHit(hits: THREE.Intersection[]): THREE.Intersection | undefined {
+  return hits.find((h) => {
+    for (let o: THREE.Object3D | null = h.object; o; o = o.parent) if (!o.visible) return false;
+    return true;
+  });
 }
 
 const MODELS = {
@@ -39,6 +59,11 @@ const MODELS = {
   loaf: "food/loaf.glb",
   carton: "food/carton.glb",
   egg: "food/egg.glb",
+  cheese: "food/cheese.glb",
+  chocolate: "food/chocolate.glb",
+  honey: "food/honey.glb",
+  oil: "food/bottle-oil.glb",
+  wine: "food/wine-red.glb",
 } as const;
 
 const PEOPLE = [
@@ -51,10 +76,19 @@ const PRODUCT_MODEL: Record<string, { key: keyof typeof MODELS; perSlot: number;
   pan: { key: "loaf", perSlot: 1, size: 0.17 },
   leche: { key: "carton", perSlot: 1, size: 0.2 },
   huevos: { key: "egg", perSlot: 3, size: 0.09 },
+  chocolate: { key: "chocolate", perSlot: 2, size: 0.13 },
+  queso: { key: "cheese", perSlot: 1, size: 0.18 },
+  miel: { key: "honey", perSlot: 2, size: 0.12 },
+  aceite: { key: "oil", perSlot: 2, size: 0.2 },
+  vino: { key: "wine", perSlot: 2, size: 0.24 },
 };
 
-const ROBOT_TINT: Record<Robot["color"], string> = { cian: "#7fe3f0", naranja: "#ffb877" };
-const ROBOT_RING: Record<Robot["color"], string> = { cian: "#2ec4d6", naranja: "#f28c28" };
+const ROBOT_TINT: Record<Robot["color"], string> = {
+  cian: "#7fe3f0", naranja: "#ffb877", verde: "#8fe39b", morado: "#c3a3f0", rosa: "#ffa8cf", amarillo: "#ffe27a",
+};
+const ROBOT_RING: Record<Robot["color"], string> = {
+  cian: "#2ec4d6", naranja: "#f28c28", verde: "#3fa34d", morado: "#9b6bd6", rosa: "#e86aa6", amarillo: "#e8c33a",
+};
 
 type Anim = "idle" | "walk" | "interact-right" | "emote-yes" | "emote-no" | "pick-up";
 
@@ -78,7 +112,7 @@ class Animated {
   }
 }
 
-const PRODUCT_EMOJI: Record<string, string> = { pan: "🍞", leche: "🥛", huevos: "🥚" };
+export const PRODUCT_EMOJI: Record<string, string> = { pan: "🍞", leche: "🥛", huevos: "🥚", chocolate: "🍫", queso: "🧀", miel: "🍯", aceite: "🫒", vino: "🍷" };
 
 interface Coin {
   mesh: THREE.Mesh;
@@ -118,10 +152,14 @@ interface ShelfView {
 /** Estantería del almacén con las cajas de un producto. */
 interface CrateView {
   product: ProductName;
+  /** La estantería completa (las de productos premium no se ven hasta que llega la primera mercancía). */
+  rack: THREE.Group;
   boxes: THREE.Object3D[];
   label: HTMLDivElement;
   /** Lo más que ha tenido (la estantería se ve llena con esa cantidad). */
   max: number;
+  /** El producto de muestra encima: aparece cuando llega la primera mercancía. */
+  sample: THREE.Object3D;
 }
 
 /** Algo que muestra información al pasar el mouse: un estante o una estantería del almacén. */
@@ -131,7 +169,9 @@ interface HoverTarget {
 }
 
 /** Color de cada producto (franjas de las cajas, letreros). */
-const PRODUCT_COLOR: Record<string, number> = { pan: 0xd9822b, leche: 0x3d8bd9, huevos: 0xe8c33a };
+const PRODUCT_COLOR: Record<string, number> = {
+  pan: 0xd9822b, leche: 0x3d8bd9, huevos: 0xe8c33a, chocolate: 0x7a4a2a, queso: 0xf0c040, miel: 0xe09a1c, aceite: 0x7d9a2c, vino: 0x8c1f3a,
+};
 
 export class Store3D {
   private readonly renderer: THREE.WebGLRenderer;
@@ -143,9 +183,17 @@ export class Store3D {
   private readonly models = new Map<string, GLTF>();
   private readonly robots = new Map<string, RobotView>();
   private readonly customers = new Map<number, CustomerView>();
-  private readonly shelves: ShelfView[] = [];
+  /** Por posición ("x,y"): en una partida en línea los objetos del espejo se reemplazan en cada vista. */
+  private readonly shelves = new Map<string, ShelfView>();
+  /** Terreno por ampliar: un grupo por lote (cerca, piso de obra y letrero); se quita al comprarlo. */
+  private readonly lots = new Map<number, THREE.Group>();
+  /** Colocar estante: fantasma que sigue al mouse y casillas válidas resaltadas. */
+  private placing: { kind: PlaceKind; ghost: THREE.Object3D; marks: THREE.Group; cursor: THREE.Mesh; tile: { x: number; y: number } | null } | null = null;
+  /** Cajas registradoras en 3D (también las que el jugador coloca después). */
+  private readonly registerViews = new Map<number, { model: THREE.Object3D; badge: HTMLDivElement; active: boolean | null }>();
   private readonly crates: CrateView[] = [];
   private readonly hoverTargets: HoverTarget[] = [];
+  private serverRoom!: ServerRoom;
   // ── día y noche ──
   private hemi!: THREE.HemisphereLight;
   private sun!: THREE.DirectionalLight;
@@ -220,7 +268,16 @@ export class Store3D {
     this.controls.maxPolarAngle = 1.15;
     this.controls.update();
 
-    this.labels.domElement.addEventListener("pointerdown", (e) => this.pick(e));
+    // solo un clic de verdad: soltar cerca de donde se presionó (arrastrar gira la cámara y no debe abrir nada)
+    let down: { x: number; y: number; t: number; button: number } | null = null;
+    this.labels.domElement.addEventListener("pointerdown", (e) => (down = { x: e.clientX, y: e.clientY, t: performance.now(), button: e.button }));
+    this.labels.domElement.addEventListener("pointerup", (e) => {
+      const d = down;
+      down = null;
+      if (!d || d.button !== e.button || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6 || performance.now() - d.t > 600) return;
+      this.pick(e);
+    });
+    this.labels.domElement.addEventListener("contextmenu", (e) => this.placing && e.preventDefault());
     this.tip = document.createElement("div");
     this.tip.className = "hover-tip";
     this.tip.hidden = true;
@@ -332,42 +389,11 @@ export class Store3D {
     this.buildWarehouse(w);
 
     // estantes con huecos para los productos (empiezan libres y vacíos)
-    for (const shelf of w.shelves) {
-      const model = this.model("shelf");
-      model.position.copy(this.pos(shelf.x, shelf.y)).add(new THREE.Vector3(0, 0, -0.16));
-      model.scale.setScalar(0.92);
-      s.add(model);
-      const slots: THREE.Group[] = [];
-      const items: THREE.Object3D[] = [];
-      model.traverse((o) => {
-        if (o !== model && (o.name.startsWith("carton") || o.name.startsWith("box"))) items.push(o);
-      });
-      // los productos de fábrica se esconden; cada hueco se llena según el stock real
-      for (const item of items) {
-        item.visible = false;
-        const slot = new THREE.Group();
-        slot.position.copy(item.position);
-        item.parent!.add(slot);
-        slots.push(slot);
-      }
-      // de abajo hacia arriba, del frente hacia atrás
-      slots.sort((a, b) => a.position.y - b.position.y || b.position.z - a.position.z);
-      const div = document.createElement("div");
-      div.className = "badge-shelf";
-      const badge = new CSS2DObject(div);
-      badge.position.copy(this.pos(shelf.x, shelf.y)).add(new THREE.Vector3(0, 1.05, -0.1));
-      s.add(badge);
-      const view: ShelfView = { slots, product: null, badge, shown: 0 };
-      this.hoverTargets.push({ obj: model, html: (world) => this.shelfInfo(world, world.shelves.indexOf(shelf)) });
-      this.fillShelf(view, shelf.product);
-      this.shelves.push(view);
-    }
+    for (const shelf of w.shelves) this.addShelfView(shelf);
+    this.buildLots(w);
 
-    // caja registradora: Lupe atiende desde el oeste, la cola llega desde el este
-    const reg = this.model("register");
-    reg.position.copy(this.pos(w.register.x, w.register.y)).add(new THREE.Vector3(0.22, 0, 0));
-    reg.rotation.y = Math.PI / 2;
-    s.add(reg);
+    // cajas registradoras: el cajero atiende desde el oeste, la fila llega desde el este
+    for (const r of w.registers) this.addRegisterView(r);
 
     // decoración que no estorba: carritos junto a la entrada y una fruta en el pasillo
     const cart = this.model("cart");
@@ -377,6 +403,7 @@ export class Store3D {
 
     for (const r of w.robots) this.robots.set(r.id, this.makeRobot(r));
     this.buildCompass(w);
+    this.buildServerRoom(w);
 
     // cientos de piezas fijas -> unas pocas mallas (una por material); lo plano no proyecta sombra
     mergeStatic(s, statics, (m) => {
@@ -384,6 +411,256 @@ export class Store3D {
       const size = m.geometry.boundingBox!.getSize(new THREE.Vector3()).multiply(m.getWorldScale(new THREE.Vector3()));
       return Math.min(size.x, size.y, size.z) < 0.06 && size.y < 0.4;
     });
+  }
+
+  /** Un estante en 3D con huecos que se llenan según el stock (también los que el jugador coloca después). */
+  private addShelfView(shelf: Shelf): void {
+    const s = this.scene;
+    const model = this.model("shelf");
+    model.position.copy(this.pos(shelf.x, shelf.y)).add(new THREE.Vector3(0, 0, -0.16));
+    model.scale.setScalar(0.92);
+    s.add(model);
+    const slots: THREE.Group[] = [];
+    const items: THREE.Object3D[] = [];
+    model.traverse((o) => {
+      if (o !== model && (o.name.startsWith("carton") || o.name.startsWith("box"))) items.push(o);
+    });
+    // los productos de fábrica se esconden; cada hueco se llena según el stock real
+    for (const item of items) {
+      item.visible = false;
+      const slot = new THREE.Group();
+      slot.position.copy(item.position);
+      item.parent!.add(slot);
+      slots.push(slot);
+    }
+    // de abajo hacia arriba, del frente hacia atrás
+    slots.sort((a, b) => a.position.y - b.position.y || b.position.z - a.position.z);
+    const div = document.createElement("div");
+    div.className = "badge-shelf";
+    const badge = new CSS2DObject(div);
+    badge.position.copy(this.pos(shelf.x, shelf.y)).add(new THREE.Vector3(0, 1.05, -0.1));
+    s.add(badge);
+    const view: ShelfView = { slots, product: null, badge, shown: 0 };
+    // el estante se busca cada vez por posición (en línea el objeto cambia)
+    this.hoverTargets.push({ obj: model, html: (w) => this.shelfInfo(w.shelfAt(shelf.x, shelf.y) ?? shelf) });
+    this.fillShelf(view, shelf.product);
+    this.shelves.set(`${shelf.x},${shelf.y}`, view);
+  }
+
+  private addRegisterView(r: Register): void {
+    const model = this.model("register");
+    model.position.copy(this.pos(r.x, r.y)).add(new THREE.Vector3(0.22, 0, 0));
+    model.rotation.y = Math.PI / 2;
+    model.traverse((o) => (o.userData.registerId = r.id));
+    this.scene.add(model);
+    const badge = this.label("", "badge-register", model, 1.55);
+    this.hoverTargets.push({
+      obj: model,
+      html: (w) => {
+        const reg = w.registers.find((x) => x.id === r.id) ?? r;
+        return this.registerTip(reg);
+      },
+    });
+    this.registerViews.set(r.id, { model, badge, active: null });
+  }
+
+  private registerTip(r: Register): string {
+    return `<strong>🧾 Caja ${r.id}</strong> <span class="tip-pos">(${r.x}, ${r.y})</span>
+        <div>${r.active ? "<b>Activa</b>: recibe clientes" : "<b>Inactiva</b>: no recibe clientes"} · fila: ${r.queue.length}</div>
+        <small>Clic para ${r.active ? "desactivarla" : "activarla"}. La fila se hace hacia el este.</small>`;
+  }
+
+  private updateRegisters(w: World): void {
+    for (const r of w.registers) {
+      if (!this.registerViews.has(r.id)) this.addRegisterView(r);
+      const v = this.registerViews.get(r.id)!;
+      if (v.active === r.active) continue;
+      v.active = r.active;
+      v.badge.textContent = r.active ? `Caja ${r.id}` : `Caja ${r.id} · cerrada`;
+      v.badge.classList.toggle("off", !r.active);
+      v.model.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        const mat = (m.userData.baseMat ??= m.material) as THREE.MeshStandardMaterial;
+        if (r.active) m.material = mat;
+        else {
+          const dim = mat.clone();
+          dim.color = mat.color.clone().multiplyScalar(0.45);
+          m.material = dim;
+        }
+      });
+    }
+  }
+
+  /** Terreno por ampliar: piso de obra, cinta de precaución en el borde oeste y un letrero. */
+  private buildLots(w: World): void {
+    const cells = new Map<number, { x: number; y: number }[]>();
+    for (const [k, lot] of w.lockedCells) {
+      const [x, y] = k.split(",").map(Number);
+      if (!cells.has(lot)) cells.set(lot, []);
+      cells.get(lot)!.push({ x, y });
+    }
+    const dirt = new THREE.MeshStandardMaterial({ color: 0x8f8a7e, roughness: 1 });
+    const stripe = new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.7 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.7 });
+    const post = new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.8 });
+    for (const [lot, list] of cells) {
+      const g = new THREE.Group();
+      const xs = list.map((c) => c.x);
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
+      const cx = (x0 + x1) / 2;
+      const cz = (w.height - 1) / 2;
+      const ground = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0 + 1, 0.04, w.height), dirt);
+      ground.position.set(cx, 0.03, cz);
+      ground.receiveShadow = true;
+      g.add(ground);
+      // cerca de obra en el borde oeste del lote: postes y franjas amarillas y negras
+      const fx = x0 - 0.5;
+      for (let i = 0; i <= w.height; i++) {
+        const p = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 6), post);
+        p.position.set(fx, 0.25, i - 0.5);
+        g.add(p);
+      }
+      for (let i = 0; i < w.height * 4; i++) {
+        const seg = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.09, 0.25), i % 2 ? dark : stripe);
+        seg.position.set(fx, 0.38, -0.5 + i * 0.25 + 0.125);
+        g.add(seg);
+      }
+      const div = document.createElement("div");
+      div.className = "label-lot";
+      div.innerHTML = `<b>Terreno ${lot}</b><span>Se amplía en Mejoras</span>`;
+      const label = new CSS2DObject(div);
+      label.position.set(cx, 0.6, cz);
+      g.add(label);
+      this.scene.add(g);
+      this.lots.set(lot, g);
+    }
+  }
+
+  private updateLots(w: World): void {
+    if (!this.lots.size) return;
+    const open = new Set(w.lockedLots);
+    for (const [lot, g] of this.lots) {
+      if (open.has(lot)) continue;
+      g.traverse((o) => {
+        if (o instanceof CSS2DObject) o.element.remove();
+      });
+      this.scene.remove(g);
+      this.lots.delete(lot);
+    }
+  }
+
+  // ── colocar estantes ─────────────────────────────────────────
+
+  private problemAt(kind: PlaceKind, x: number, y: number): string | null {
+    const w = this.hooks.world();
+    return kind === "shelf" ? w.shelfProblem(x, y) : w.registerProblem(x, y);
+  }
+
+  /** Entra al modo colocar: un estante (o una caja) fantasma sigue al mouse y se resaltan las casillas válidas. */
+  startPlacement(kind: PlaceKind = "shelf"): void {
+    this.stopPlacement();
+    const w = this.hooks.world();
+    const ghost = this.model(kind === "shelf" ? "shelf" : "register");
+    if (kind === "shelf") ghost.scale.setScalar(0.92);
+    else ghost.rotation.y = Math.PI / 2;
+    ghost.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.castShadow = false;
+      m.material = new THREE.MeshBasicMaterial({ color: 0x3fd06a, transparent: true, opacity: 0.55, depthWrite: false });
+    });
+    ghost.visible = false;
+    const marks = new THREE.Group();
+    const markGeo = new THREE.PlaneGeometry(0.86, 0.86).rotateX(-Math.PI / 2);
+    const markMat = new THREE.MeshBasicMaterial({ color: 0x3fd06a, transparent: true, opacity: 0.22, depthWrite: false });
+    for (let y = 0; y < w.height; y++) {
+      for (let x = 0; x < w.width; x++) {
+        if (this.problemAt(kind, x, y)) continue;
+        const m = new THREE.Mesh(markGeo, markMat);
+        m.position.copy(this.pos(x, y)).add(new THREE.Vector3(0, 0.06, 0));
+        marks.add(m);
+      }
+    }
+    const cursor = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.96, 0.96).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x3fd06a, transparent: true, opacity: 0.6, depthWrite: false }),
+    );
+    cursor.visible = false;
+    this.scene.add(marks, ghost, cursor);
+    this.placing = { kind, ghost, marks, cursor, tile: null };
+    this.container.classList.add("placing");
+    window.addEventListener("keydown", this.placeKey);
+  }
+
+  stopPlacement(): void {
+    if (!this.placing) return;
+    this.scene.remove(this.placing.ghost, this.placing.marks, this.placing.cursor);
+    this.placing = null;
+    this.container.classList.remove("placing");
+    this.container.style.cursor = "";
+    window.removeEventListener("keydown", this.placeKey);
+  }
+
+  get isPlacing(): boolean {
+    return this.placing !== null;
+  }
+
+  private readonly placeKey = (e: KeyboardEvent): void => {
+    if (e.key !== "Escape" || !this.placing) return;
+    const kind = this.placing.kind;
+    this.stopPlacement();
+    this.hooks.onPlaceCancel?.(kind);
+  };
+
+  /** Casilla del piso bajo el mouse (o null si apunta fuera). */
+  private tileUnder(e: PointerEvent): { x: number; y: number } | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+    if (!hit) return null;
+    const w = this.hooks.world();
+    const x = Math.round(hit.x);
+    const y = w.height - 1 - Math.round(hit.z);
+    return x >= 0 && y >= 0 && x < w.width && y < w.height ? { x, y } : null;
+  }
+
+  private placeHover(e: PointerEvent): void {
+    const p = this.placing!;
+    const tile = this.tileUnder(e);
+    p.tile = tile;
+    p.ghost.visible = p.cursor.visible = !!tile;
+    if (!tile) return;
+    const ok = !this.problemAt(p.kind, tile.x, tile.y);
+    const color = ok ? 0x3fd06a : 0xe2483d;
+    p.ghost.position.copy(this.pos(tile.x, tile.y)).add(p.kind === "shelf" ? new THREE.Vector3(0, 0, -0.16) : new THREE.Vector3(0.22, 0, 0));
+    p.ghost.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) (m.material as THREE.MeshBasicMaterial).color.setHex(color);
+    });
+    p.cursor.position.copy(this.pos(tile.x, tile.y)).add(new THREE.Vector3(0, 0.07, 0));
+    (p.cursor.material as THREE.MeshBasicMaterial).color.setHex(color);
+    this.container.style.cursor = ok ? "copy" : "not-allowed";
+  }
+
+  private placeClick(e: PointerEvent): void {
+    const kind = this.placing!.kind;
+    if (e.button === 2) {
+      this.stopPlacement();
+      this.hooks.onPlaceCancel?.(kind);
+      return;
+    }
+    if (e.button !== 0) return;
+    const tile = this.tileUnder(e);
+    if (!tile) return;
+    if (!this.hooks.onPlace || this.hooks.onPlace(kind, tile.x, tile.y) !== null) return; // no se pudo: sigue eligiendo
+    // si quedan por colocar, sigue en el modo (las casillas válidas cambian)
+    const w = this.hooks.world();
+    const remaining = kind === "shelf" ? w.shelvesToPlace : w.registersToPlace;
+    if (remaining > 0) this.startPlacement(kind);
+    else this.stopPlacement();
   }
 
   /** Las cuatro direcciones de move(), pintadas alrededor de la tienda. */
@@ -494,17 +771,24 @@ export class Store3D {
     doorStrip.position.copy(this.pos(w.warehouse.x + 0.5, w.warehouse.y)).add(new THREE.Vector3(0, 0.013, 0));
     this.scene.add(doorStrip);
 
-    // una estantería metálica por producto contra la pared norte del cuarto, mirando a la cámara
-    const products = Object.keys(WAREHOUSE_START) as ProductName[];
+    // una estantería metálica por producto: los básicos contra la pared norte del cuarto (mirando a la cámara) y los
+    // premium contra la pared oeste (mirando al pasillo). Las premium aparecen cuando llega su primera mercancía.
+    const products = PRODUCT_NAMES;
+    const northCount = maxX - minX + 1;
     const L = 0.9; // largo de cada estantería (una casilla)
     const D = 0.4; // fondo
     const levels = [0.06, 0.44, 0.82];
     const H = 1.2;
     products.forEach((product, i) => {
       const rack = new THREE.Group();
-      // se arma con el frente hacia +x y se gira para que mire al sur
-      rack.position.copy(this.pos(Math.min(maxX, minX + i), maxY)).add(new THREE.Vector3(0, 0, -0.5 + D / 2 + 0.03));
-      rack.rotation.y = -Math.PI / 2;
+      // se arma con el frente hacia +x; las del norte se giran para que miren al sur
+      if (i < northCount) {
+        rack.position.copy(this.pos(minX + i, maxY)).add(new THREE.Vector3(0, 0, -0.5 + D / 2 + 0.03));
+        rack.rotation.y = -Math.PI / 2;
+      } else {
+        rack.position.copy(this.pos(minX, Math.max(minY, maxY - 1 - (i - northCount)))).add(new THREE.Vector3(-0.5 + D / 2 + 0.03, 0, 0));
+      }
+      rack.visible = PRODUCTS[product].basic;
       // parales
       const post = new THREE.BoxGeometry(0.045, H, 0.045);
       for (const dx of [-D / 2, D / 2]) for (const dz of [-L / 2, L / 2]) mesh(post, steel, dx, H / 2, dz, rack);
@@ -540,7 +824,7 @@ export class Store3D {
       mesh(new THREE.BoxGeometry(0.01, 0.12, 0.42), color, D / 2 + 0.03, H - 0.03, 0, rack);
       this.scene.add(rack);
       const label = this.label("", "label-crate", rack, H + 0.35);
-      const view: CrateView = { product, boxes, label, max: 1 };
+      const view: CrateView = { product, rack, boxes, label, sample, max: 0 };
       this.crates.push(view);
       this.hoverTargets.push({
         obj: rack,
@@ -548,7 +832,7 @@ export class Store3D {
           const n = world.warehouseStock[product];
           return `<strong>${PRODUCT_EMOJI[product]} Almacén: ${product}</strong>
             <div><b>${n}</b> unidades guardadas</div>
-            <small>${n > 0 ? `Viene de tu tabla de inventario. pick("${product}") toma hasta 5.` : "Se acabó: pick() se lo compra al proveedor (60% del precio)."}</small>`;
+            <small>${n > 0 ? `Viene de tu tabla de inventario. pick("${product}") toma hasta 5.` : PRODUCTS[product].basic ? "Se acabó: pick() se lo compra al proveedor del barrio (60% del precio)." : "Se acabó: pídelo a El Surtidor en el Navegador y migra su Excel."}</small>`;
         },
       });
     });
@@ -569,7 +853,6 @@ export class Store3D {
       p.scale.setScalar(0.8);
       this.scene.add(p);
     };
-    for (let y = minY; y < maxY - 1; y += 2) pallet(this.pos(minX, y).add(new THREE.Vector3(-0.27, 0, 0)), y === minY ? 8 : 6, y);
     pallet(this.pos(maxX, minY).add(new THREE.Vector3(0.18, 0, 0.2)), 5, 9);
 
     const truck = this.model("handTruck");
@@ -584,6 +867,63 @@ export class Store3D {
     const obj = new CSS2DObject(sign);
     obj.position.copy(this.pos((minX + maxX) / 2, minY)).add(new THREE.Vector3(0, 0.05, 0.62));
     this.scene.add(obj);
+  }
+
+  /** Sala de servidores: un anexo al oeste de la tienda (ver serverroom.ts). */
+  private buildServerRoom(w: World): void {
+    this.serverRoom = new ServerRoom(this.scene, w.height - 3.2, (text, cls, parent, y) => this.label(text, cls, parent, y));
+    this.serverRoom.racks.forEach((r, slot) => this.hoverTargets.push({ obj: r.group, html: (world) => this.rackInfo(world, slot) }));
+    const sign = document.createElement("div");
+    sign.className = "label-room";
+    sign.textContent = "🖥 Servidores";
+    const obj = new CSS2DObject(sign);
+    obj.position.set(-2.2, 0.05, w.height - 3.2 + 2.95);
+    this.scene.add(obj);
+  }
+
+  private rackInfo(w: World, slot: number): string {
+    if (slot >= w.racksOwned) {
+      const coming = w.orders.some((o) => o.items.includes("rack"));
+      return `<strong>Espacio para otro rack</strong><div>${coming ? "Ya compraste uno: llega mañana en el camión." : "Cómpralo en TecnoMercado (Navegador) junto con sus piezas."}</div><small>Clic: abrir la tienda.</small>`;
+    }
+    const s = w.rackServer(slot);
+    if (!s) {
+      const b = w.racks[slot];
+      return b
+        ? `<strong>Puesto ${slot + 1}: montaje a medias</strong><div>Haz clic para seguir montando.</div>`
+        : `<strong>Puesto ${slot + 1} libre</strong><div>${w.parts.length ? `Tienes ${w.parts.length} pieza${w.parts.length === 1 ? "" : "s"} en el almacén.` : "Compra piezas en TecnoMercado."}</div><small>Haz clic para montar un servidor.</small>`;
+    }
+    const robots = w.robotsOn(s).map((r) => r.name);
+    const pct = Math.round(s.load * 100);
+    const bar = `<span class="tip-bar"><span style="width:${pct}%"></span></span>`;
+    const state = !s.os ? "sin Linux" : !s.ip ? "sin red" : s.services.has("robot-agent") ? "listo" : "sin robot-agent";
+    return `<strong>🖥 ${s.hostname}</strong> <span class="tip-pos">${s.ip ?? "sin IP"}</span>
+      <div>CPU <b>${pct}%</b> ${bar}</div>
+      <div>${s.cores} núcleo${s.cores === 1 ? "" : "s"} · ${s.ramGb} GB · ${Math.round(s.temp)} °C${s.gpu ? " · GPU" : ""}</div>
+      <div>Robots: <b>${robots.length ? robots.join(", ") : "ninguno"}</b> · ${state}</div>
+      ${s.malware && s.malware.respawnAt === null ? "<div class='tip-bad'>Algo raro está usando la CPU</div>" : ""}
+      ${s.ddos ? "<div class='tip-bad'>Red saturada</div>" : ""}
+      <small>Clic: abrir la terminal.</small>`;
+  }
+
+  private updateServerRoom(w: World, time: number): void {
+    this.serverRoom.update(w, time, this.hovered?.obj ?? null, 1 - this.daylight.k);
+  }
+
+  /** Acerca la cámara a un puesto del rack (antes de entrar al montaje en primera persona). */
+  focusRack(slot: number): Promise<void> {
+    const v = this.serverRoom.racks[slot];
+    if (!v) return Promise.resolve();
+    return new Promise((resolve) => {
+      const p = v.group.position;
+      this.controls.enabled = false;
+      this.mode = "flying";
+      this.camera.clearViewOffset();
+      this.fly = {
+        start: -1, dur: 1100, fromPos: this.camera.position.clone(), fromTarget: this.controls.target.clone(),
+        toPos: new THREE.Vector3(p.x + 0.2, 1.3, p.z + 1.55), toTarget: new THREE.Vector3(p.x, 0.85, p.z), resolve,
+      };
+    });
   }
 
   private buildWalls(w: World): void {
@@ -676,7 +1016,7 @@ export class Store3D {
   }
 
   private makeCustomer(c: Customer): CustomerView {
-    const key = PEOPLE[c.id % PEOPLE.length];
+    const key = PEOPLE[Math.abs(c.id) % PEOPLE.length];
     const gltf = this.models.get(key)!;
     const body = cloneSkinned(gltf.scene);
     const group = new THREE.Group();
@@ -685,6 +1025,7 @@ export class Store3D {
     basket.position.set(0.3, 0.18, 0.05);
     group.add(basket);
     const label = this.label("", "label-customer", group, 1.0);
+    if (c.test) this.label("🧪 Prueba", "label-test", group, 1.3);
     this.scene.add(group);
     const at = this.pos(c.x, c.y);
     group.position.copy(at);
@@ -712,13 +1053,14 @@ export class Store3D {
     const events = w.drainEvents();
     for (const e of events) {
       if (e.type === "float") this.float(e.x, e.y, e.text, e.tone);
-      else if (e.type === "sound" && e.name === "cash") this.coinBurst();
+      else if (e.type === "sound" && e.name === "cash") this.coinBurst(e.x, e.y);
     }
     if (events.length) this.hooks.onEvents(events);
 
     this.updateDaylight(w, dt);
     this.updateShelves(w, time);
     this.updateCrates(w);
+    this.updateServerRoom(w, time);
     this.refreshTip();
     this.updateRobots(w, frac, dt, time);
     this.updateCustomers(w, dt);
@@ -736,8 +1078,12 @@ export class Store3D {
   }
 
   private updateShelves(w: World, time: number): void {
-    w.shelves.forEach((s, i) => {
-      const view = this.shelves[i];
+    this.updateLots(w);
+    this.updateRegisters(w);
+    w.shelves.forEach((s) => {
+      const key = `${s.x},${s.y}`;
+      if (!this.shelves.has(key)) this.addShelfView(s); // un estante que el jugador acaba de colocar
+      const view = this.shelves.get(key)!;
       if (view.product !== s.product) this.fillShelf(view, s.product);
       view.slots.forEach((slot, n) => {
         slot.visible = n < s.stock;
@@ -808,6 +1154,16 @@ export class Store3D {
     for (const c of this.crates) {
       const n = w.warehouseStock[c.product];
       c.max = Math.max(c.max, n);
+      // las estanterías de lo básico siempre están; las de lo premium aparecen cuando llega algo
+      const shown = c.max > 0 || PRODUCTS[c.product].basic;
+      if (c.rack.visible !== shown) c.rack.visible = shown;
+      // sin mercancía registrada todavía: estantería vacía y sin letrero (no es que "se acabó")
+      c.label.hidden = c.max === 0;
+      if (c.sample.visible !== c.max > 0) c.sample.visible = c.max > 0;
+      if (c.max === 0) {
+        c.boxes.forEach((b) => (b.visible = false));
+        continue;
+      }
       const full = c.max;
       const visible = n <= 0 ? 0 : Math.max(1, Math.ceil((n / full) * c.boxes.length));
       c.boxes.forEach((b, i) => (b.visible = i < visible));
@@ -839,7 +1195,10 @@ export class Store3D {
   private updateRobots(w: World, frac: number, dt: number, time: number): void {
     const selected = this.hooks.selected();
     for (const r of w.robots) {
+      // un robot recién comprado (Mejoras → Equipo)
+      if (!this.robots.has(r.id)) this.robots.set(r.id, this.makeRobot(r));
       const v = this.robots.get(r.id)!;
+      if (v.label.textContent !== r.name) v.label.textContent = r.name; // le cambiaron el nombre
       let target: THREE.Vector3;
       let heading = v.heading;
 
@@ -938,9 +1297,9 @@ export class Store3D {
   }
 
   /** Monedas que saltan de la caja registradora con cada venta. */
-  private coinBurst(): void {
+  private coinBurst(x?: number, y?: number): void {
     const w = this.hooks.world();
-    const origin = this.pos(w.register.x, w.register.y).add(new THREE.Vector3(0.22, 0.6, 0));
+    const origin = this.pos(x ?? w.register.x, y ?? w.register.y).add(new THREE.Vector3(0.22, 0.6, 0));
     for (let i = 0; i < 7; i++) {
       const mesh = new THREE.Mesh(this.coinGeo, this.coinMat);
       mesh.castShadow = true;
@@ -988,8 +1347,7 @@ export class Store3D {
 
   // ── información al pasar el mouse ────────────────────────────
 
-  private shelfInfo(w: World, i: number): string {
-    const s = w.shelves[i];
+  private shelfInfo(s: Shelf): string {
     const pct = Math.round((s.stock / s.capacity) * 100);
     const bar = `<span class="tip-bar"><span style="width:${pct}%"></span></span>`;
     const where = `<span class="tip-pos">(${s.x}, ${s.y})</span>`;
@@ -1005,11 +1363,15 @@ export class Store3D {
   }
 
   private hover(e: PointerEvent): void {
+    if (this.placing) {
+      this.setHover(null);
+      return this.placeHover(e);
+    }
     if (e.buttons !== 0 || this.mode !== "store") return this.setHover(null);
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
-    const hit = this.raycaster.intersectObjects(this.hoverTargets.map((t) => t.obj), true)[0];
+    const hit = this.raycaster.intersectObjects(this.hoverTargets.filter((t) => t.obj.visible).map((t) => t.obj), true)[0];
     let target: HoverTarget | null = null;
     if (hit) {
       for (let o: THREE.Object3D | null = hit.object; o && !target; o = o.parent) target = this.hoverTargets.find((t) => t.obj === o) ?? null;
@@ -1041,13 +1403,23 @@ export class Store3D {
   // ── interacción ──────────────────────────────────────────────
 
   private pick(e: PointerEvent): void {
+    if (this.placing) return this.placeClick(e);
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     const groups = [...this.robots.values()].map((v) => v.group);
-    const hit = this.raycaster.intersectObjects(groups, true)[0];
+    const hit = visibleHit(this.raycaster.intersectObjects(groups, true));
     const id = hit?.object.userData.robotId as string | undefined;
-    if (id) this.hooks.onSelect(id);
+    if (id) return this.hooks.onSelect(id);
+    if (this.mode !== "store") return;
+    // el raycaster de three también choca con lo invisible (racks sin comprar, puestos que no caben en la sala)
+    const rackHit = visibleHit(this.raycaster.intersectObjects(this.serverRoom.racks.map((r) => r.group), true));
+    const slot = this.serverRoom.slotOf(rackHit?.object ?? null);
+    if (slot >= 0) return this.hooks.onRack?.(slot);
+    if (e.button !== 0) return;
+    const regHit = visibleHit(this.raycaster.intersectObjects([...this.registerViews.values()].map((v) => v.model), true));
+    const regId = regHit?.object.userData.registerId as number | undefined;
+    if (regId !== undefined) this.hooks.onRegister?.(regId);
   }
 
   private resize(): void {
@@ -1283,7 +1655,7 @@ export class Store3D {
     // Busca la distancia más corta en que las esquinas de la tienda (con paredes) caben en la zona libre.
     const world = this.hooks.world();
     const corners: THREE.Vector3[] = [];
-    for (const x of [-0.75, world.width - 0.25]) {
+    for (const x of [-4.1, world.width - 0.25]) {
       for (const z of [-0.75, world.height - 0.25]) {
         for (const y of [-0.4, 1.1]) corners.push(new THREE.Vector3(x, y, z));
       }

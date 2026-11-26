@@ -7,15 +7,15 @@ function escapeHtml(s: string): string {
 
 const colLetter = (i: number) => String.fromCharCode(65 + i);
 
-/** Hoja de cálculo de solo lectura, con aspecto de Excel: la entrega del distribuidor. */
+/** Hoja de cálculo de solo lectura, con aspecto de Excel: la entrega del distribuidor y los Excel de cada pedido. */
 export class SheetWindow {
   private sheetIndex = 0;
 
-  constructor(private readonly win: FloatingWindow, private readonly book: Workbook) {
+  constructor(private readonly win: FloatingWindow, private book: Workbook) {
     win.body.innerHTML = `
       <div class="xl">
         <div class="xl-bar">
-          <span class="xl-file">${escapeHtml(book.filename)}</span>
+          <span class="xl-file"></span>
           <span class="xl-ref">A1</span>
           <span class="xl-fx">fx</span>
           <span class="xl-value"></span>
@@ -23,7 +23,7 @@ export class SheetWindow {
         <div class="xl-grid-wrap"><table class="xl-grid"></table></div>
         <div class="xl-tabs"></div>
         <p class="xl-hint">Solo lectura. Para trabajar con estos datos usa pandas en <strong>inventario.py</strong>:
-          <code>pd.read_excel("${escapeHtml(book.filename)}")</code></p>
+          <code class="xl-read"></code></p>
       </div>`;
     win.body.querySelector(".xl-grid")!.addEventListener("click", (e) => {
       const td = (e.target as HTMLElement).closest<HTMLElement>("td[data-ref]");
@@ -38,7 +38,24 @@ export class SheetWindow {
     this.render();
   }
 
+  /** Archivo que se está mostrando. */
+  get filename(): string {
+    return this.book.filename;
+  }
+
+  /** Muestra otro archivo (p. ej. el Excel de un pedido que acaba de llegar). */
+  setBook(book: Workbook): void {
+    if (book === this.book) return;
+    this.book = book;
+    this.sheetIndex = 0;
+    this.render();
+  }
+
   private render(): void {
+    const name = this.book.filename;
+    this.win.body.querySelector(".xl-file")!.textContent = name;
+    this.win.body.querySelector(".xl-read")!.textContent = `pd.read_excel("${name}")`;
+    this.win.titleEl.lastChild!.textContent = name;
     const sheet = this.book.sheets[this.sheetIndex];
     const cols = sheet.columns.length;
     const head = `<tr><th class="corner"></th>${sheet.columns.map((_, j) => `<th>${colLetter(j)}</th>`).join("")}</tr>`;
