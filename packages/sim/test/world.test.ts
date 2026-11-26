@@ -636,6 +636,50 @@ describe("equipo: cajas y robots nuevos", () => {
   });
 });
 
+describe("move(x, y) y return_product()", () => {
+  test("move(x, y) camina solo hasta la casilla, rodeando las paredes del almacén", () => {
+    const w = mundo();
+    const tono = w.robot("tono");
+    w.setScript("tono", "a = move(5, 2)\nprint(a, get_pos())\nb = move((1, 3))\nprint(b, get_pos())");
+    w.runRobot("tono");
+    correr(w, 600);
+    const log = tono.console.map((l) => l.text);
+    expect(log).toContain("True (5, 2)");
+    expect(log).toContain("True (1, 3)");
+    expect(w.isRunning("tono")).toBe(false);
+  });
+
+  test("move(x, y) a una casilla que no existe devuelve False", () => {
+    const w = mundo();
+    const tono = w.robot("tono");
+    w.setScript("tono", "print(move(99, 99))");
+    w.runRobot("tono");
+    correr(w, 20);
+    expect(tono.console.map((l) => l.text)).toContain("False");
+  });
+
+  test("return_product() devuelve al almacén lo que carga el robot", () => {
+    const w = mundo();
+    const tono = w.robot("tono");
+    const antes = w.warehouseStock.pan;
+    w.setScript("tono", 'pick("pan", 5)\nprint(cargo())\nprint(return_product())\nprint(cargo(), cargo_product())');
+    w.runRobot("tono");
+    correr(w, 200);
+    expect(tono.console.filter((l) => l.kind === "print").map((l) => l.text)).toEqual(["5", "5", "0 None"]);
+    expect(w.warehouseStock.pan).toBe(antes);
+    expect(tono.cargo).toEqual({ product: null, n: 0 });
+  });
+
+  test("return_product() fuera del almacén no hace nada", () => {
+    const w = mundo();
+    const tono = w.robot("tono");
+    w.setScript("tono", 'pick("pan", 3)\nmove(East)\nmove(East)\nprint(return_product())');
+    w.runRobot("tono");
+    correr(w, 200);
+    expect(tono.cargo.n).toBe(3);
+  });
+});
+
 describe("scan_item", () => {
   test("volver a escanear (código detenido o vuelto a ejecutar) devuelve otra vez todo el carrito", () => {
     const w = mundo();

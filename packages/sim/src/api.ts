@@ -1,4 +1,4 @@
-import { Action, HostObject, PyBuiltin, PyError, PyList, PyTuple, type Value } from "@cdb/interpreter";
+import { Action, type BuiltinResult, HostObject, PyBuiltin, PyError, PyList, PyTuple, type Value } from "@cdb/interpreter";
 import { PRODUCTS, PRODUCT_NAMES, type ProductName, ROBOT, TICKS, COST_RATIO } from "./config.js";
 import type { Customer, Robot, Shelf, World } from "./world.js";
 
@@ -37,7 +37,7 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
     warn(text);
     return new Action(TICKS.failed, () => value);
   };
-  const fn = (name: string, impl: (args: Value[]) => Value | Action) =>
+  const fn = (name: string, impl: (args: Value[]) => BuiltinResult) =>
     new PyBuiltin(name, (args) => impl(args));
   /** Acción con etiqueta visible sobre el robot mientras dura. */
   const act = (label: string, ticks: number, complete: () => Value) => {
@@ -68,6 +68,53 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
     return c;
   };
 
+  /** Un paso en una dirección (lo que hacía siempre move(North)). */
+  const step = (dir: string): Action => {
+    const d = DIRS[dir];
+    if (!d) throw new PyError("move() necesita North, South, East o West", 0);
+    const to = { x: robot.x + d[0], y: robot.y + d[1] };
+    if (world.tileAt(to.x, to.y) === null || world.wallBetween(robot, to) || world.occupied(to.x, to.y, robot)) {
+      return new Action(TICKS.failed, () => false);
+    }
+    // con el servidor saturado el robot camina más lento (el render usa estos ticks para interpolar)
+    robot.moving = { from: { x: robot.x, y: robot.y }, to, startTick: world.tick, ticks: Math.round(TICKS.move * world.slowdown(robot)) };
+    return act(`${ARROWS[dir]} ${dir}`, TICKS.move, () => {
+      if (robot.moving) {
+        robot.x = to.x;
+        robot.y = to.y;
+        robot.moving = null;
+      }
+      return true;
+    });
+  };
+
+  /** move(x, y): da los pasos uno por uno (cada uno cuesta lo mismo que move(North)). */
+  function* walkTo(to: { x: number; y: number }): Generator<unknown, Value, unknown> {
+    let blocked = 0;
+    while (robot.x !== to.x || robot.y !== to.y) {
+      // se recalcula en cada paso: así rodea a un robot que se quedó quieto en el camino
+      const path = world.pathTo({ x: robot.x, y: robot.y }, to);
+      if (!path || !path.length) {
+        warn(`move(${to.x}, ${to.y}): no hay camino hasta esa casilla`);
+        return false;
+      }
+      const next = path[0];
+      const dir = Object.keys(DIRS).find((k) => robot.x + DIRS[k][0] === next.x && robot.y + DIRS[k][1] === next.y)!;
+      const moved = (yield step(dir)) as boolean;
+      if (moved) {
+        blocked = 0;
+        continue;
+      }
+      // otro robot estorba: espera un poco y lo vuelve a intentar
+      if (++blocked > 20) {
+        warn(`move(${to.x}, ${to.y}): otro robot no deja pasar`);
+        return false;
+      }
+      yield new Action(TICKS.wait, () => null);
+    }
+    return true;
+  }
+
   return {
     North: "North",
     South: "South",
@@ -78,23 +125,19 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
     ENTRANCE: tuple(world.entrance.x, world.entrance.y),
 
     // ── movimiento ──
-    move: fn("move", ([dir]) => {
-      const d = typeof dir === "string" ? DIRS[dir] : undefined;
-      if (!d) throw new PyError("move() necesita North, South, East o West", 0);
-      const to = { x: robot.x + d[0], y: robot.y + d[1] };
-      if (world.tileAt(to.x, to.y) === null || world.wallBetween(robot, to) || world.occupied(to.x, to.y, robot)) {
-        return new Action(TICKS.failed, () => false);
+    /**
+     * move(North): una casilla. move(x, y) o move((x, y)): camina solo hasta esa casilla por el camino más corto
+     * (rodea paredes; si otro robot estorba, espera un poco). Devuelve True al llegar, False si no pudo.
+     */
+    move: fn("move", (args) => {
+      if (args.length === 1 && typeof args[0] === "string") return step(args[0]);
+      const target = args.length === 1 && args[0] instanceof PyTuple ? args[0].items : args;
+      if (target.length !== 2 || typeof target[0] !== "number" || typeof target[1] !== "number") {
+        throw new PyError("move() necesita una dirección (North, South, East o West) o una casilla: move(4, 5)", 0);
       }
-      // con el servidor saturado el robot camina más lento (el render usa estos ticks para interpolar)
-      robot.moving = { from: { x: robot.x, y: robot.y }, to, startTick: world.tick, ticks: Math.round(TICKS.move * world.slowdown(robot)) };
-      return act(`${ARROWS[dir as string]} ${dir}`, TICKS.move, () => {
-        if (robot.moving) {
-          robot.x = to.x;
-          robot.y = to.y;
-          robot.moving = null;
-        }
-        return true;
-      });
+      const to = { x: Math.floor(target[0]), y: Math.floor(target[1]) };
+      if (world.tileAt(to.x, to.y) === null) return fail(`move(${to.x}, ${to.y}): esa casilla no existe o no se puede pisar`, false);
+      return walkTo(to);
     }),
     get_pos: fn("get_pos", () => tuple(robot.x, robot.y)),
     wait: fn("wait", () => act("…", TICKS.wait, () => null)),
@@ -133,6 +176,20 @@ export function makeApi(world: World, robot: Robot): Record<string, Value> {
       return act(`📦 ${amount} ${product}`, TICKS.pickPerUnit * amount, () => {
         world.sound("pick", robot);
         robot.cargo = { product, n: robot.cargo.n + amount };
+        return amount;
+      });
+    }),
+
+    /** En el almacén: devuelve lo que carga el robot (todo) y lo suma otra vez a lo guardado. */
+    return_product: fn("return_product", () => {
+      if (!world.inWarehouse(robot.x, robot.y)) return fail("return_product(): hay que estar dentro del almacén", 0);
+      if (robot.cargo.n === 0 || !robot.cargo.product) return fail("return_product(): el robot no carga nada", 0);
+      const product = robot.cargo.product;
+      const amount = robot.cargo.n;
+      return act(`↩ ${amount} ${product}`, TICKS.pickPerUnit * amount, () => {
+        world.sound("place", robot);
+        world.returnToWarehouse(product, amount);
+        robot.cargo = { product: null, n: 0 };
         return amount;
       });
     }),

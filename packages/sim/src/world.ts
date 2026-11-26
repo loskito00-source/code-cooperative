@@ -634,6 +634,41 @@ export class World {
     this.events.push({ type: "warehouse", product, quantity });
   }
 
+  /**
+   * Un robot devuelve al almacén lo que cargaba (return_product). Es un "sacar" negativo: el mismo evento le dice a la
+   * web que lo sume otra vez a la tabla de inventario del jugador.
+   */
+  returnToWarehouse(product: ProductName, quantity: number): void {
+    this.warehouseStock[product] += quantity;
+    this.events.push({ type: "warehouse", product, quantity: -quantity });
+  }
+
+  /**
+   * Camino más corto (casillas, sin contar la de salida) de `from` a `to`, sin atravesar paredes ni salirse del mapa.
+   * Los otros robots no cuentan (se mueven); null si no hay camino.
+   */
+  pathTo(from: Pos, to: Pos): Pos[] | null {
+    if (this.tileAt(to.x, to.y) === null) return null;
+    const key = (p: Pos) => p.y * this.width + p.x;
+    const prev = new Map<number, Pos | null>([[key(from), null]]);
+    const queue: Pos[] = [from];
+    for (let i = 0; i < queue.length; i++) {
+      const cur = queue[i];
+      if (cur.x === to.x && cur.y === to.y) {
+        const path: Pos[] = [];
+        for (let p: Pos | null = cur; p && key(p) !== key(from); p = prev.get(key(p)) ?? null) path.unshift(p);
+        return path;
+      }
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const next = { x: cur.x + dx, y: cur.y + dy };
+        if (prev.has(key(next)) || this.tileAt(next.x, next.y) === null || this.wallBetween(cur, next)) continue;
+        prev.set(key(next), cur);
+        queue.push(next);
+      }
+    }
+    return null;
+  }
+
   drainEvents(): SimEvent[] {
     const e = this.events;
     this.events = [];

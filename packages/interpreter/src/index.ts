@@ -12,6 +12,7 @@ export {
   PyRange,
   PyList,
   PyTuple,
+  type BuiltinResult,
   type CallContext,
   type Value,
   pyRepr,

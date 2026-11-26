@@ -1,4 +1,4 @@
-import type { Expr, Param, Program, Stmt, Target } from "./ast.js";
+import type { Comprehension, Expr, Param, Program, Stmt, Target } from "./ast.js";
 import { PyError } from "./errors.js";
 import { tokenize, type Token } from "./lexer.js";
 
@@ -434,6 +434,32 @@ class Parser {
         }
         if (t.value === "[") {
           const items: Expr[] = [];
+          // comprensión de listas: [x * 2 for x in numeros if x > 0]
+          if (!this.isOp("]")) {
+            const first = this.expression();
+            if (this.isKw("for")) {
+              const generators: Comprehension[] = [];
+              while (this.isKw("for")) {
+                this.next();
+                const target = this.targetList();
+                this.expect("keyword", "in", "'in'");
+                const iter = this.orExpr();
+                const ifs: Expr[] = [];
+                while (this.isKw("if")) {
+                  this.next();
+                  ifs.push(this.orExpr());
+                }
+                generators.push({ target, iter, ifs });
+              }
+              this.expect("op", "]", "']'");
+              return { kind: "listcomp", elt: first, generators, line };
+            }
+            items.push(first);
+            if (!this.eat("op", ",")) {
+              this.expect("op", "]", "']'");
+              return { kind: "list", items, line };
+            }
+          }
           while (!this.isOp("]")) {
             items.push(this.expression());
             if (!this.eat("op", ",")) break;

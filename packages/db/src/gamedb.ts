@@ -418,7 +418,10 @@ export class GameDB {
     return { table, nameCol, qtyCol, stock };
   }
 
-  /** Descuenta del inventario del jugador lo que un robot sacó del almacén (como el rol jugador: es su tabla). */
+  /**
+   * Descuenta del inventario del jugador lo que un robot sacó del almacén (como el rol jugador: es su tabla).
+   * Con `quantity` negativa suma (return_product devolvió mercancía): va a la primera fila de ese producto.
+   */
   async takeFromWarehouse(src: WarehouseSource, product: string, quantity: number): Promise<void> {
     if (!src.qtyCol) return;
     await this.whenReady();

@@ -272,3 +272,44 @@ describe("textos de varias líneas", () => {
     expect(errorOf('x = """hola')).toBe('Línea 1: falta cerrar el texto con """');
   });
 });
+
+describe("comprensión de listas", () => {
+  test.each([
+    ["print([x * 2 for x in [1, 2, 3]])", "[2, 4, 6]"],
+    ["print([x for x in range(10) if x % 2 == 0])", "[0, 2, 4, 6, 8]"],
+    ["print([x for x in range(20) if x % 2 == 0 if x > 10])", "[12, 14, 16, 18]"],
+    ["print([(x, y) for x in range(2) for y in 'ab'])", "[(0, 'a'), (0, 'b'), (1, 'a'), (1, 'b')]"],
+    ["print([a + b for a, b in [(1, 2), (3, 4)]])", "[3, 7]"],
+    ["print(['par' if n % 2 == 0 else 'impar' for n in range(3)])", "['par', 'impar', 'par']"],
+    ["print([[c for c in range(r)] for r in range(3)])", "[[], [0], [0, 1]]"],
+    ["print(sum([p for p in [2000, 4500]]), len([1 for _ in range(4)]))", "6500 4"],
+    ["print([], [1], [1, 2,])", "[] [1] [1, 2]"],
+  ])("%s", (src, expected) => {
+    expect(output(src)).toBe(expected);
+  });
+
+  test("la variable del for no se sale de la comprensión y se ven las de afuera", () => {
+    expect(output(py`
+      x = "afuera"
+      factor = 3
+      nums = [x * factor for x in range(3)]
+      print(nums, x)
+    `)).toBe("[0, 3, 6] afuera");
+  });
+
+  test("dentro de una función ve los parámetros y las variables locales", () => {
+    expect(output(py`
+      def precios(productos, extra):
+          base = 100
+          return [base + extra for p in productos if p != "x"]
+      print(precios(["pan", "x", "leche"], 5))
+    `)).toBe("[105, 105]");
+  });
+
+  test("la variable no existe afuera después", () => {
+    expect(errorOf(py`
+      cuadrados = [i * i for i in range(3)]
+      print(i)
+    `)).toContain("'i' no existe");
+  });
+});

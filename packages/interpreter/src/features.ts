@@ -33,6 +33,12 @@ export function checkFeatures(program: Program, unlocked: ReadonlySet<Feature>):
     if (!e) return;
     switch (e.kind) {
       case "list": use("lists", e.line); e.items.forEach(expr); break;
+      case "listcomp":
+        use("lists", e.line);
+        use("for", e.line);
+        expr(e.elt);
+        e.generators.forEach((g) => { target(g.target); expr(g.iter); g.ifs.forEach(expr); });
+        break;
       case "tuple": e.items.forEach(expr); break;
       case "dict": use("dicts", e.line); e.keys.forEach(expr); e.values.forEach(expr); break;
       case "binop": case "boolop": expr(e.left); expr(e.right); break;

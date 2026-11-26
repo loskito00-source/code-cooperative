@@ -7,7 +7,7 @@ export interface CommandDoc {
 }
 
 export const COMMANDS: CommandDoc[] = [
-  { group: "Moverse", kind: "function", name: "move", signature: "move(North)", description: "Mueve el robot una casilla: North, South, East o West. Devuelve False si no pudo (borde, pared u otro robot). Al almacén se entra por su puerta, arriba." },
+  { group: "Moverse", kind: "function", name: "move", signature: "move(North)  ·  move(4, 5)", description: "Con una dirección (North, South, East o West) mueve el robot una casilla. Con una casilla, move(4, 5), camina solo hasta allá por el camino más corto (rodea paredes y espera si otro robot estorba). Devuelve False si no pudo. Pasa el mouse sobre la tienda para ver la coordenada de cada casilla." },
   { group: "Moverse", kind: "function", name: "get_pos", signature: "get_pos()", description: "Posición actual como (x, y). (0, 0) es la esquina de abajo a la izquierda." },
   { group: "Moverse", kind: "function", name: "wait", signature: "wait()", description: "Espera un momento sin hacer nada (deja descansar la CPU del servidor)." },
   { group: "Moverse", kind: "constant", name: "WAREHOUSE", signature: "WAREHOUSE", description: "La casilla del almacén junto a su puerta: (2, 5). El almacén es el cuarto de la izquierda (x de 0 a 2)." },
@@ -19,6 +19,7 @@ export const COMMANDS: CommandDoc[] = [
   { group: "Moverse", kind: "constant", name: "West", signature: "West", description: "Dirección: izquierda." },
 
   { group: "Reponer", kind: "function", name: "pick", signature: 'pick("pan", 5)', description: "En cualquier casilla del almacén: toma productos (máximo 5 a la vez). Sale de la mercancía guardada; si se acabó, el proveedor trae más y cobra el 60% del precio." },
+  { group: "Reponer", kind: "function", name: "return_product", signature: "return_product()", description: "En cualquier casilla del almacén: devuelve todo lo que carga el robot. Vuelve a lo guardado (y a tu tabla de inventario) y el robot queda con las manos libres." },
   { group: "Reponer", kind: "function", name: "place", signature: "place()", description: "Sobre un estante: pone lo que cargas. Un estante libre queda para ese producto; uno que ya tiene otro producto no lo acepta." },
   { group: "Reponer", kind: "function", name: "cargo", signature: "cargo()", description: "Cuántas unidades lleva el robot." },
   { group: "Reponer", kind: "function", name: "cargo_product", signature: "cargo_product()", description: "Qué producto lleva, o None." },

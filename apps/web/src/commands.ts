@@ -76,7 +76,12 @@ function buildGroups(world: World): Group[] {
           id: "sintaxis",
           label: "Sintaxis",
           intro: `Toda la sintaxis viene desbloqueada desde el inicio. Lo que se compra en Mejoras es la tienda: estantes, un local más grande, marketing y el centro de datos.<span class="cmd-feats">${syntaxChips}</span>`,
-          entries: [],
+          entries: [
+            { sig: "[x * 2 for x in numeros]", desc: "Comprensión de listas: arma una lista nueva en una sola línea, aplicando algo a cada elemento." },
+            { sig: "[p for p in productos if p != \"pan\"]", desc: "Con if al final, solo entran los que cumplen la condición." },
+            { sig: "sum([price(p) for p in scan_item()])", desc: "Ejemplo en la caja: el total del cliente en una línea." },
+            { sig: "[(x, y) for x in range(3) for y in range(2)]", desc: "Se pueden encadenar varios for (como bucles anidados). La variable del for solo existe dentro de los corchetes." },
+          ],
         },
         { id: "funciones", label: "Funciones", intro: "Funciones de Python que siempre puedes usar.", entries: fromDocs("Python") },
         {
@@ -106,7 +111,7 @@ function buildGroups(world: World): Group[] {
         {
           id: "depurar",
           label: "Depurar",
-          intro: "Seguir el código línea por línea. Mientras un robot está detenido, el tiempo de la tienda se pausa.",
+          intro: "Seguir el código línea por línea. Solo se detiene ese robot: la tienda sigue corriendo.",
           entries: [
             { sig: "Punto de parada", desc: "Clic a la izquierda del número de línea: el robot se detiene antes de esa línea." },
             { sig: "⤵ Paso  (F10)", desc: "Ejecuta una sola línea. Si el robot no está corriendo, lo arranca en la primera." },

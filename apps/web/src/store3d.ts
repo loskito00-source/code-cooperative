@@ -781,6 +781,8 @@ export class Store3D {
     const H = 1.2;
     products.forEach((product, i) => {
       const rack = new THREE.Group();
+      // casilla de la estantería (para mostrar su coordenada: sirve para move(x, y))
+      const cell = i < northCount ? { x: minX + i, y: maxY } : { x: minX, y: Math.max(minY, maxY - 1 - (i - northCount)) };
       // se arma con el frente hacia +x; las del norte se giran para que miren al sur
       if (i < northCount) {
         rack.position.copy(this.pos(minX + i, maxY)).add(new THREE.Vector3(0, 0, -0.5 + D / 2 + 0.03));
@@ -830,7 +832,7 @@ export class Store3D {
         obj: rack,
         html: (world) => {
           const n = world.warehouseStock[product];
-          return `<strong>${PRODUCT_EMOJI[product]} Almacén: ${product}</strong>
+          return `<strong>${PRODUCT_EMOJI[product]} Almacén: ${product}</strong> <span class="tip-pos">(${cell.x}, ${cell.y})</span>
             <div><b>${n}</b> unidades guardadas</div>
             <small>${n > 0 ? `Viene de tu tabla de inventario. pick("${product}") toma hasta 5.` : PRODUCTS[product].basic ? "Se acabó: pick() se lo compra al proveedor del barrio (60% del precio)." : "Se acabó: pídelo a El Surtidor en el Navegador y migra su Excel."}</small>`;
         },
@@ -1376,6 +1378,7 @@ export class Store3D {
     if (hit) {
       for (let o: THREE.Object3D | null = hit.object; o && !target; o = o.parent) target = this.hoverTargets.find((t) => t.obj === o) ?? null;
     }
+    if (!target) target = this.cellTarget(ndc);
     this.setHover(target);
     if (target) {
       const box = this.container.getBoundingClientRect();
@@ -1386,10 +1389,34 @@ export class Store3D {
     }
   }
 
+  /** Casilla del piso bajo el mouse: muestra su coordenada (para escribir move(x, y)). */
+  private cellTarget(ndc: THREE.Vector2): HoverTarget | null {
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const at = new THREE.Vector3();
+    if (!this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), at)) return null;
+    const w = this.hooks.world();
+    const x = Math.round(at.x);
+    const y = w.height - 1 - Math.round(at.z);
+    const kind = w.tileAt(x, y);
+    if (kind === null) return null;
+    const key = `${x},${y}`;
+    // se reutiliza el mismo objeto mientras el mouse siga en la casilla (así el tooltip no parpadea)
+    if (this.cellHover?.key === key) return this.cellHover.target;
+    const name = { floor: "Piso", warehouse: "Almacén", shelf: "Estante", register: "Caja", entrance: "Entrada" }[kind];
+    const target: HoverTarget = {
+      obj: this.scene,
+      html: () => `<strong>${name}</strong> <span class="tip-pos">(${x}, ${y})</span><small>move(${x}, ${y}) camina hasta aquí.</small>`,
+    };
+    this.cellHover = { key, target };
+    return target;
+  }
+
+  private cellHover: { key: string; target: HoverTarget } | null = null;
+
   private setHover(t: HoverTarget | null): void {
     this.hovered = t;
     this.tip.hidden = !t;
-    this.container.style.cursor = t ? "help" : "";
+    this.container.style.cursor = t && t !== this.cellHover?.target ? "help" : "";
     if (t) this.refreshTip();
   }
 

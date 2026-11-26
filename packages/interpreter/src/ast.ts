@@ -4,6 +4,8 @@ export type Expr =
   | { kind: "const"; value: true | false | null; line: number }
   | { kind: "name"; id: string; line: number }
   | { kind: "list"; items: Expr[]; line: number }
+  /** Comprensión de listas: [elt for x in a if c for y in b ...] */
+  | { kind: "listcomp"; elt: Expr; generators: Comprehension[]; line: number }
   | { kind: "tuple"; items: Expr[]; line: number }
   | { kind: "dict"; keys: Expr[]; values: Expr[]; line: number }
   | { kind: "binop"; op: string; left: Expr; right: Expr; line: number }
@@ -37,6 +39,13 @@ export type Stmt =
   | { kind: "pass"; line: number }
   | { kind: "global"; names: string[]; line: number }
   | { kind: "import"; module: string; alias: string | null; names: { name: string; alias: string | null }[] | null; line: number };
+
+/** Una cláusula "for x in iter if c1 if c2" de una comprensión. */
+export interface Comprehension {
+  target: Target;
+  iter: Expr;
+  ifs: Expr[];
+}
 
 export interface Param {
   name: string;

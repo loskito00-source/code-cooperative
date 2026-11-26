@@ -279,3 +279,23 @@ siempre tendrá la misma estructura".
   cliente que está ahí empieza desde cero (`World.runRobot` limpia su `checkout` si la venta no se cerró): se le puede
   volver a escanear, cobrar y dar la devuelta.
 - "Con el paso a paso el juego se pausa": el depurador ya no pausa la tienda; solo se detiene ese robot.
+
+## return_product(), move(x, y) y coordenadas al pasar el mouse
+
+- `return_product()` (reponedor): dentro del almacén devuelve todo lo que carga el robot (3 ticks por unidad). Suma a
+  `warehouseStock` y emite el evento `warehouse` con cantidad negativa: la web lo suma a la tabla de inventario del
+  jugador (primera fila de ese producto) con el mismo `takeFromWarehouse`.
+- `move(x, y)` (o `move((x, y))`): el robot camina solo hasta la casilla por el camino más corto (`World.pathTo`, BFS
+  que respeta paredes). Da los pasos uno por uno (cada uno cuesta lo mismo que `move(North)`), recalcula el camino en
+  cada paso y espera si otro robot estorba (se rinde tras ~20 intentos). Devuelve True al llegar. `move(North)` sigue
+  igual.
+- Al pasar el mouse por la tienda se ve la coordenada de la casilla (piso, almacén, caja...) y las estanterías del
+  almacén también muestran la suya, para escribir `move(x, y)`.
+
+## Comprensión de listas
+
+- El usuario pidió poder usar list comprehension. El intérprete ahora entiende `[elt for x in it if c ...]` con
+  varios `for` e `if` (nodo `listcomp`). Como en Python 3, las variables del `for` viven en un ámbito propio (un frame
+  hijo con `closure` = el de afuera): no pisan ni dejan variables afuera. Solo listas (no dict/set ni generadores).
+- Para la velocidad por tamaño del código, una comprensión cuenta como parte de la instrucción donde está (es más
+  compacta que un for, igual que en Python).

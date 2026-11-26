@@ -55,6 +55,13 @@ function walkExpr(e: Expr | null, visit: (e: Expr) => void): void {
     case "tuple":
       e.items.forEach((x) => walkExpr(x, visit));
       break;
+    case "listcomp":
+      walkExpr(e.elt, visit);
+      for (const g of e.generators) {
+        walkExpr(g.iter, visit);
+        g.ifs.forEach((x) => walkExpr(x, visit));
+      }
+      break;
     case "dict":
       e.keys.forEach((x) => walkExpr(x, visit));
       e.values.forEach((x) => walkExpr(x, visit));

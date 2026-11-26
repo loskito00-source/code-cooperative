@@ -562,6 +562,9 @@ Inspirado en The Farmer Was Replaced: el juego ocupa toda la pantalla y el códi
 - Pestaña Variables: nombre, valor y tipo de cada variable (locales de la función y globales del script).
 - La línea pausada se marca en amarillo y el robot muestra un globo "⏸ línea N" en la tienda.
 
+## Comprensión de listas
+Se puede usar como en Python: [x * 2 for x in numeros], con if al final para filtrar y varios for encadenados. La variable del for solo existe dentro de los corchetes. Ejemplo en la caja: total = sum([price(p) for p in scan_item()]).
+
 ## Texto con valores
 f-strings de Python: f"Total: {total}", con formato {x:.2f}, {x:,}, {x:>8}, {x:%}. Sumar texto y número ("a" + 5) es error, igual que en Python, con la pista de usar str().
 
@@ -764,9 +767,11 @@ S["appendices"] = {
             "content": """| Función | Etapa | Ticks | Descripción |
 |---|---|---|---|
 | move(dir) | 1 | 4 | Mueve 1 casilla: North, South, East, West. Devuelve True/False |
+| move(x, y) | 1 | 4/casilla | Camina solo hasta la casilla (x, y) por el camino más corto; rodea paredes y espera si otro robot estorba. Pasar el mouse por la tienda muestra la coordenada de cada casilla |
 | get_pos() | 1 | 0 | Devuelve (x, y) |
 | pick(product, n) | 1 | 3/u | Toma n unidades en cualquier casilla del almacén (si se acabó, el proveedor cobra) |
 | place() | 1 | 3/u | Pone lo que carga en el estante (un estante libre queda para ese producto) |
+| return_product() | 1 | 3/u | En el almacén: devuelve todo lo que carga el robot (vuelve a lo guardado y a la tabla de inventario) |
 | warehouse_stock(product) | 1 | 0 | Unidades de un producto que quedan en el almacén |
 | get_shelves() | 2 | 0 | Lista de estantes |
 | shelf.stock() / shelf.product() / shelf.pos() | 2 | 0 | Datos del estante |

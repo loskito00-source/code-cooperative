@@ -491,6 +491,30 @@ export class VM {
     }
   }
 
+  /** Una cláusula "for ... in ... if ..." de una comprensión (y las siguientes, anidadas). */
+  private *comprehension(e: Extract<Expr, { kind: "listcomp" }>, i: number, outer: Frame, scope: Frame, out: Value[]): Gen<void> {
+    if (i === e.generators.length) {
+      out.push(yield* this.eval(e.elt, scope));
+      this.limit(out.length, e.line);
+      return;
+    }
+    const g = e.generators[i];
+    // el primer iterable se evalúa afuera (como en Python); los demás ya ven las variables de la comprensión
+    const it = this.iterate(yield* this.eval(g.iter, i === 0 ? outer : scope), e.line);
+    for (let r = it.next(); !r.done; r = it.next()) {
+      if (this.op(e.line)) yield PAUSE;
+      yield* this.assign(g.target, r.value, scope);
+      let keep = true;
+      for (const c of g.ifs) {
+        if (!truthy(yield* this.eval(c, scope))) {
+          keep = false;
+          break;
+        }
+      }
+      if (keep) yield* this.comprehension(e, i + 1, outer, scope, out);
+    }
+  }
+
   private setName(id: string, v: Value, frame: Frame): void {
     if (frame.fn && frame.fn.globalNames.has(id)) frame.module.globals.set(id, v);
     else frame.locals.set(id, v);
@@ -539,6 +563,24 @@ export class VM {
         const items: Value[] = [];
         for (const x of e.items) items.push(yield* this.eval(x, frame));
         return new PyTuple(items);
+      }
+      case "listcomp": {
+        // como en Python 3, las variables del for viven solo dentro de la comprensión: un "frame" hijo que ve las
+        // variables de afuera (por la cadena de closures) sin cambiarlas
+        const names = new Set<string>();
+        const collect = (t: Target) => {
+          if (t.kind === "name") names.add(t.id);
+          else if (t.kind === "tuple") t.items.forEach(collect);
+        };
+        e.generators.forEach((g) => collect(g.target));
+        const scope: Frame = {
+          locals: new Map(),
+          fn: new PyFunction("<comprensión>", [], [], [], names, new Set(), frame, frame.module),
+          module: frame.module,
+        };
+        const out: Value[] = [];
+        yield* this.comprehension(e, 0, frame, scope, out);
+        return new PyList(out);
       }
       case "dict": {
         const d = new PyDict();
