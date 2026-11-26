@@ -1651,6 +1651,10 @@ async function openStore(animated: boolean): Promise<void> {
     audio.cue("open");
     for (const w of [scriptWin, sheetWin, dbWin]) w.close();
     await store.flyToStore();
+  } else {
+    // partida guardada que ya estaba abierta: la cámara seguía girando como en el menú principal
+    boxesUnloaded = true;
+    store.showStore();
   }
   await Promise.race([syncWarehouse(), new Promise((r) => setTimeout(r, 15000))]); // sin base, no se traba
   if (progress.prepDone) {

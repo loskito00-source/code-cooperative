@@ -1636,6 +1636,20 @@ export class Store3D {
     }
   }
 
+  /** Pone la cámara en la tienda al tiro (sin vuelo), p. ej. al cargar una partida que ya estaba abierta. */
+  showStore(): void {
+    this.intro = null;
+    this.fly = null;
+    for (const b of this.truck.boxes) b.visible = false; // la mercancía ya se descargó
+    this.openDoors(1);
+    this.mode = "store";
+    this.userMovedCamera = false;
+    this.inset = Math.round(this.hooks.leftInset());
+    this.frameCamera();
+    this.controls.enabled = true;
+    this.controls.update();
+  }
+
   private applyViewOffset(): void {
     const { clientWidth: w, clientHeight: h } = this.container;
     if (!w || !h) return;
