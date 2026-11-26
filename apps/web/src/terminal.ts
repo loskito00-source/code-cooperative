@@ -72,13 +72,24 @@ export class TerminalWindow {
       this.print(this.shell.welcome());
       this.syncPrompt();
     }
-    win.body.querySelector(".term")!.addEventListener("pointerup", () => {
-      if (!window.getSelection()?.toString()) this.inputEl.focus();
+    // un clic simple en la terminal pone el cursor en la línea de comando. No si fue para seleccionar texto (se
+    // arrastró o quedó algo seleccionado) ni si fue en la barra de desplazamiento; y sin mover el scroll (antes cada
+    // clic la mandaba al final y no dejaba leer lo de arriba).
+    const box = win.body.querySelector<HTMLElement>(".term")!;
+    let down: { x: number; y: number } | null = null;
+    box.addEventListener("pointerdown", (e) => {
+      const onScrollbar = e.offsetX > box.clientWidth || e.offsetY > box.clientHeight;
+      down = e.button === 0 && !onScrollbar ? { x: e.clientX, y: e.clientY } : null;
+    });
+    box.addEventListener("pointerup", (e) => {
+      const click = down && Math.abs(e.clientX - down.x) < 4 && Math.abs(e.clientY - down.y) < 4;
+      down = null;
+      if (click && !window.getSelection()?.toString() && e.target !== this.inputEl) this.inputEl.focus({ preventScroll: true });
     });
     this.inputEl.addEventListener("keydown", (e) => this.key(e));
     // la línea de comando es compartida: lo que escribe uno le aparece al otro mientras escribe
     this.inputEl.addEventListener("input", () => this.shareTyping());
-    win.onShow = () => setTimeout(() => this.inputEl.focus(), 0);
+    win.onShow = () => setTimeout(() => this.inputEl.focus({ preventScroll: true }), 0);
   }
 
   private title(hostname: string): void {
@@ -111,6 +122,7 @@ export class TerminalWindow {
       this.inputEl.value = "";
       this.histIdx = -1;
       this.link.typing?.("");
+      this.scroll(); // al dar Enter vuelve al final para ver la respuesta
       this.exec(text);
       return;
     }
@@ -216,6 +228,7 @@ export class TerminalWindow {
       this.histIdx = -1;
       if (text.trim() && this.inputEl.type !== "password") this.remoteHistory.push(text);
       this.link.typing?.("");
+      this.scroll();
       this.link.send?.({ text });
       return;
     }
@@ -259,6 +272,7 @@ export class TerminalWindow {
 
   private print(lines: string[]): void {
     if (!lines.length) return;
+    const stick = this.atBottom();
     this.recent.push(...lines);
     if (this.recent.length > 300) this.recent.splice(0, this.recent.length - 300);
     const frag = document.createDocumentFragment();
@@ -269,7 +283,13 @@ export class TerminalWindow {
     }
     this.out.append(frag);
     while (this.out.childElementCount > 600) this.out.firstElementChild!.remove();
-    this.scroll();
+    if (stick) this.scroll();
+  }
+
+  /** ¿Está viendo el final? Si subió a leer algo, la salida nueva no lo baja de golpe. */
+  private atBottom(): boolean {
+    const box = this.win.body.querySelector<HTMLElement>(".term")!;
+    return box.scrollHeight - box.scrollTop - box.clientHeight < 48;
   }
 
   private syncPrompt(): void {
@@ -311,6 +331,6 @@ export class TerminalWindow {
   }
 
   focus(): void {
-    this.inputEl.focus();
+    this.inputEl.focus({ preventScroll: true });
   }
 }

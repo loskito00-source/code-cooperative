@@ -636,6 +636,30 @@ describe("equipo: cajas y robots nuevos", () => {
   });
 });
 
+describe("TecnoMercado", () => {
+  test("lo que se compra de noche llega al amanecer siguiente (no un día después)", () => {
+    const w = mundo();
+    w.money = 1_000_000;
+    w.startNight();
+    expect(w.order(["ram-8"])).toMatchObject({ ok: true });
+    const antes = w.parts.length;
+    w.openStore();
+    expect(w.parts.length).toBe(antes + 1);
+  });
+
+  test("lo que se compra de día llega al amanecer siguiente", () => {
+    const w = mundo();
+    w.money = 1_000_000;
+    w.openStore();
+    expect(w.order(["ram-8"])).toMatchObject({ ok: true });
+    const antes = w.parts.length;
+    for (let i = 0; i < DAY.ticks + 5; i++) w.step(); // cierra a las 19:00
+    expect(w.parts.length).toBe(antes);
+    w.openStore();
+    expect(w.parts.length).toBe(antes + 1);
+  });
+});
+
 describe("move(x, y) y return_product()", () => {
   test("move(x, y) camina solo hasta la casilla, rodeando las paredes del almacén", () => {
     const w = mundo();

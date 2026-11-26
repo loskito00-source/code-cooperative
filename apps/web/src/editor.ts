@@ -180,6 +180,10 @@ export class CodeEditor {
         ],
       }),
     });
+    // Al cambiar el zoom de la ventana (+/−) cambia el tamaño de la letra pero no siempre el del editor: CodeMirror
+    // seguía con la altura de línea vieja y al seleccionar con el mouse caía en otra línea (tomaba más líneas).
+    // Cada vez que cambia el tamaño del contenido, que vuelva a medir.
+    new ResizeObserver(() => this.view.requestMeasure()).observe(this.view.contentDOM);
   }
 
   private diagnostics(view: EditorView): Diagnostic[] {

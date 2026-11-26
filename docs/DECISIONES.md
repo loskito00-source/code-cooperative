@@ -312,3 +312,14 @@ siempre tendrá la misma estructura".
   orden en que se minimizaron). Al darle clic vuelve con la misma posición y tamaño. La posición se lee del estilo
   (`left`/`top`), no de `offsetLeft`, que da 0 en una ventana que no se dibuja (eso también arregla que una ventana
   cerrada guardara la posición 0).
+
+## Arreglos: TecnoMercado de noche, scroll y selección en la terminal, selección en el editor
+
+- Lo comprado en TecnoMercado **de noche** llegaba un día tarde: al cerrar a las 19:00 `world.day` ya es el día que
+  viene y el pedido sumaba otro. Ahora de noche llega al amanecer siguiente (`World.order`).
+- Terminal: cada clic ponía el foco en la línea de comando y eso la bajaba al final (no dejaba subir a leer, y al usar
+  la barra de desplazamiento "se bugueaba"). Ahora solo un clic simple (sin arrastrar, sin texto seleccionado, fuera de
+  la barra) enfoca, con `preventScroll`. La salida nueva solo baja al final si ya estabas viendo el final; al dar Enter
+  sí vuelve al final.
+- Editor de código: con el zoom de la ventana CodeMirror podía quedarse con la altura de línea vieja y la selección con
+  el mouse tomaba otras líneas; un `ResizeObserver` sobre el contenido le pide volver a medir.

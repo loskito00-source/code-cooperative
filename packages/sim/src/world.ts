@@ -907,7 +907,8 @@ export class World {
     }
     if (this.money < total) return { ok: false, reason: "no alcanza el dinero" };
     this.money -= total;
-    this.orders.push({ items: [...items], day: this.day + 1 });
+    // llega al próximo amanecer: de noche el día ya es el que viene (se cuenta al cerrar a las 19:00), así que no se suma
+    this.orders.push({ items: [...items], day: this.night ? this.day : this.day + 1 });
     this.sound("unlock");
     return { ok: true, total };
   }
